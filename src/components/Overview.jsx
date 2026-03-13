@@ -3,11 +3,11 @@ import { useCountUp } from '../hooks/useCountUp';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor } from '../utils/colors';
 
-echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
 
 function fmt(n) {
   if (n == null) return '—';
@@ -184,6 +184,7 @@ export default function Overview({ data, heatmap, families, repos, models, range
     }],
   };
 
+  const familyTotal = topFamilies.reduce((s, f) => s + (f.tokens || 0), 0);
   const familyOption = {
     backgroundColor: 'transparent',
     tooltip: {
@@ -197,14 +198,21 @@ export default function Overview({ data, heatmap, families, repos, models, range
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: topFamilies.map(f => ({
-        name: f.family,
-        value: f.tokens,
-        itemStyle: { color: getFamilyColor(f.family) },
-      })),
+      data: topFamilies.map(f => {
+        const pct = familyTotal > 0 ? (f.tokens || 0) / familyTotal : 0;
+        const showLabel = pct >= 0.01;
+        return {
+          name: f.family,
+          value: f.tokens,
+          itemStyle: { color: getFamilyColor(f.family) },
+          label: { show: showLabel, color: getFamilyColor(f.family) },
+          labelLine: { show: showLabel },
+        };
+      }),
     }],
   };
 
+  const modelTotal = topModels.reduce((s, m) => s + (m.tokens || 0), 0);
   const modelOption = {
     backgroundColor: 'transparent',
     tooltip: {
@@ -218,11 +226,17 @@ export default function Overview({ data, heatmap, families, repos, models, range
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: topModels.map(m => ({
-        name: m.model_name,
-        value: m.tokens,
-        itemStyle: { color: getModelColor(m.model_name) },
-      })),
+      data: topModels.map(m => {
+        const pct = modelTotal > 0 ? (m.tokens || 0) / modelTotal : 0;
+        const showLabel = pct >= 0.01;
+        return {
+          name: m.model_name,
+          value: m.tokens,
+          itemStyle: { color: getModelColor(m.model_name) },
+          label: { show: showLabel, color: getModelColor(m.model_name) },
+          labelLine: { show: showLabel },
+        };
+      }),
     }],
   };
 

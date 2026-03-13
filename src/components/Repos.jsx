@@ -2,12 +2,12 @@ import React, { useState, useMemo, useRef } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor } from '../utils/colors';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
-echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
 
 function fmt(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
@@ -48,6 +48,7 @@ function RepoDetailCharts({ repo, chartMode }) {
     valueFormatter: fmt,
     chartMode,
     defaultMode: 'donut',
+    renderTitleInChart: false,
   });
 
   const familyOption = buildDistributionOption({
@@ -58,6 +59,7 @@ function RepoDetailCharts({ repo, chartMode }) {
     valueFormatter: fmt,
     chartMode,
     defaultMode: 'donut',
+    renderTitleInChart: false,
   });
 
   const summaryRows = [
@@ -67,29 +69,13 @@ function RepoDetailCharts({ repo, chartMode }) {
 
   return (
     <div className="model-detail-wrap">
-      <div className="detail-summary-grid">
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Repo</div>
-          <div className="detail-summary-value">{repo.repo_label}</div>
-        </div>
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Tokens</div>
-          <div className="detail-summary-value">{fmt(repo.tokens)}</div>
-        </div>
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Cost</div>
-          <div className="detail-summary-value">{fmtCost(repo.cost)}</div>
-        </div>
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Sessions</div>
-          <div className="detail-summary-value">{repo.sessions.toLocaleString()}</div>
-        </div>
-      </div>
       <div className="model-detail-charts">
         <div className="model-detail-donut">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models in repo</div>
           <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" />
         </div>
         <div className="model-detail-donut">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work type in repo</div>
           <ReactEChartsCore echarts={echarts} option={familyOption} style={{ width: '100%', height: '100%' }} theme="dark" />
         </div>
       </div>
@@ -105,7 +91,7 @@ function RepoDetailCharts({ repo, chartMode }) {
             <div key={`${row.scope}-${row.key}`} className="model-detail-summary-card">
               <div className="model-detail-summary-head">
                 <span className="model-detail-swatch" style={{ background: row.scope === 'model' ? getModelColor(row.key) : getFamilyColor(row.key) }} />
-                <span>{row.key}</span>
+                <span className="model-detail-summary-name" title={row.key}>{row.key}</span>
               </div>
               <div className="model-detail-summary-line">{fmt(row.tokens)} tokens</div>
               <div className="model-detail-summary-line">{row.sessions || 0} sessions</div>

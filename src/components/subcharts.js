@@ -17,6 +17,7 @@ export function buildDistributionOption({
   chartMode = 'default',
   defaultMode = 'bar',
   emptyLabel = 'No data',
+  renderTitleInChart = true,
 }) {
   const mode = resolveSubchartMode(chartMode, defaultMode);
   const normalizedRows = (rows || [])
@@ -27,35 +28,26 @@ export function buildDistributionOption({
     })
     .filter(Boolean);
 
-  if (!normalizedRows.length) {
-    return {
-      title: {
-        text: title,
-        left: 'center',
-        top: 'middle',
-        textStyle: { fontSize: 12, color: '#484f58', fontWeight: 'normal' },
-      },
-      xAxis: { show: false },
-      yAxis: { show: false },
-      series: [],
-      graphic: {
-        type: 'text',
-        left: 'center',
-        top: '60%',
-        style: { text: emptyLabel, fill: '#484f58', fontSize: 11 },
-      },
-    };
+  const emptyOpt = {
+    xAxis: { show: false },
+    yAxis: { show: false },
+    series: [],
+    graphic: {
+      type: 'text',
+      left: 'center',
+      top: '60%',
+      style: { text: emptyLabel, fill: '#484f58', fontSize: 11 },
+    },
+  };
+  if (renderTitleInChart) {
+    emptyOpt.title = { text: title, left: 'center', top: 'middle', textStyle: { fontSize: 12, color: '#484f58', fontWeight: 'normal' } };
   }
+  if (!normalizedRows.length) return emptyOpt;
 
   if (mode === 'donut') {
-    return {
+    const total = normalizedRows.reduce((s, r) => s + (r[valueKey] || 0), 0);
+    const donutOpt = {
       backgroundColor: 'transparent',
-      title: {
-        text: title,
-        left: 'center',
-        top: 8,
-        textStyle: { fontSize: 11, color: '#8b949e', fontWeight: 'normal' },
-      },
       tooltip: {
         trigger: 'item',
         formatter: (p) => `${p.name}: ${valueFormatter(p.value)} (${p.percent}%)`,
@@ -64,30 +56,35 @@ export function buildDistributionOption({
       },
       series: [{
         type: 'pie',
-        radius: ['48%', '72%'],
-        center: ['50%', '55%'],
-        label: { show: true, color: '#8b949e', fontSize: 10, formatter: '{b}' },
+        radius: ['40%', '62%'],
+        center: ['50%', '52%'],
+        label: { show: true, color: '#8b949e', fontSize: 10, formatter: '{b}', overflow: 'truncate', width: 90 },
         labelLine: { lineStyle: { color: '#30363d' } },
         itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-        data: normalizedRows.map((row) => ({
-          name: row.key,
-          value: row[valueKey] || 0,
-          itemStyle: { color: colorForKey(row.key) },
-        })),
+        data: normalizedRows.map((row) => {
+          const val = row[valueKey] || 0;
+          const pct = total > 0 ? val / total : 0;
+          const showLabel = pct >= 0.01;
+          return {
+            name: row.key,
+            value: val,
+            itemStyle: { color: colorForKey(row.key) },
+            label: { show: showLabel, color: colorForKey(row.key) },
+            labelLine: { show: showLabel },
+          };
+        }),
       }],
     };
+    if (renderTitleInChart) {
+      donutOpt.title = { text: title, left: 'center', top: 8, textStyle: { fontSize: 11, color: '#8b949e', fontWeight: 'normal' } };
+    }
+    return donutOpt;
   }
 
   const reversed = [...normalizedRows].reverse();
   const maxValue = Math.max(...normalizedRows.map((row) => row[valueKey] || 0), 0);
-  return {
+  const barOpt = {
     backgroundColor: 'transparent',
-    title: {
-      text: title,
-      left: 'center',
-      top: 8,
-      textStyle: { fontSize: 11, color: '#8b949e', fontWeight: 'normal' },
-    },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -97,7 +94,7 @@ export function buildDistributionOption({
         return row ? `${row.key}: ${valueFormatter(row[valueKey] || 0)}` : '';
       },
     },
-    grid: { left: 65, right: 50, top: 35, bottom: 20 },
+    grid: { left: 65, right: 50, top: renderTitleInChart ? 35 : 20, bottom: 20 },
     xAxis: {
       type: 'value',
       splitNumber: 4,
@@ -118,7 +115,7 @@ export function buildDistributionOption({
     yAxis: {
       type: 'category',
       data: reversed.map((row) => row.key),
-      axisLabel: { color: '#8b949e', fontSize: 10 },
+      axisLabel: { color: '#8b949e', fontSize: 10, overflow: 'truncate', width: 55 },
       axisTick: { show: false },
       axisLine: { show: false },
     },
@@ -138,4 +135,8 @@ export function buildDistributionOption({
       },
     }],
   };
+  if (renderTitleInChart) {
+    barOpt.title = { text: title, left: 'center', top: 8, textStyle: { fontSize: 11, color: '#8b949e', fontWeight: 'normal' } };
+  }
+  return barOpt;
 }

@@ -16,7 +16,7 @@ const webPort = await findAvailablePort(DEFAULT_WEB_PORT, new Set([apiPort]));
 const apiUrl = `http://${HOST}:${apiPort}`;
 const webUrl = `http://${HOST}:${webPort}`;
 
-console.log(`\n  codexmeter dev -> api ${apiUrl} | web ${webUrl}\n`);
+console.log(`\n  codexmeter dev -> web ${webUrl}\n  api ${apiUrl}\n`);
 
 const children = [];
 let shuttingDown = false;
@@ -32,7 +32,10 @@ const backend = spawn(
   ],
   {
     stdio: 'inherit',
-    env: process.env,
+    env: {
+      ...process.env,
+      CODEXMETER_DEV_API_ONLY: '1',
+    },
   }
 );
 
@@ -49,7 +52,6 @@ const frontend = spawn(
     env: {
       ...process.env,
       CODEXMETER_API_URL: apiUrl,
-      VITE_CODEXMETER_API_URL: apiUrl,
     },
   }
 );

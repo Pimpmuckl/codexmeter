@@ -32,7 +32,6 @@ export default function App() {
   const [progress, setProgress] = useState(null);
   const [tab, setTab] = useState('Overview');
   const [range, setRange] = useState('total');
-  const [chartMode, setChartMode] = useState('default');
   const [data, setData] = useState({});
   const [showOverlay, setShowOverlay] = useState(true);
   const [fadingOut, setFadingOut] = useState(false);
@@ -142,11 +141,6 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                <select className="chart-mode-select" value={chartMode} onChange={(e) => setChartMode(e.target.value)}>
-                  <option value="default">Default charts</option>
-                  <option value="bar">Bar charts</option>
-                  <option value="donut">Donut charts</option>
-                </select>
               </>
             )}
           </div>
@@ -155,9 +149,9 @@ export default function App() {
 
         <div className="main-content">
           {tab === 'Overview' && <Overview data={data.overview} heatmap={data.heatmap} families={data.families} repos={data.repos} models={data.models} range={range} />}
-          {tab === 'Repos' && <Repos data={data.repos} chartMode={chartMode} />}
-          {tab === 'Models' && <Models data={data.models} chartMode={chartMode} />}
-          {tab === 'Daily' && <DailyUsage data={data.daily} range={range} chartMode={chartMode} />}
+          {tab === 'Repos' && <Repos data={data.repos} />}
+          {tab === 'Models' && <Models data={data.models} />}
+          {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}
           {tab === 'Sessions' && <Sessions data={data.sessions} />}
         </div>
         <div className="app-footer">Made with <span className="loading-heart">♥</span> by JJ</div>

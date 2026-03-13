@@ -2,12 +2,12 @@ import React, { useState, useRef, useMemo } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor, getEffortColor } from '../utils/colors';
 import { buildDistributionOption } from './subcharts';
 
-echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
 
 function fmt(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
@@ -62,6 +62,7 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
     valueFormatter: (value) => Math.round(value).toLocaleString(),
     chartMode,
     defaultMode: 'donut',
+    renderTitleInChart: false,
   });
 
   const tokensOption = buildDistributionOption({
@@ -72,6 +73,7 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
     valueFormatter: fmt,
     chartMode,
     defaultMode: 'donut',
+    renderTitleInChart: false,
   });
 
   const perRunOption = buildDistributionOption({
@@ -82,18 +84,22 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
     valueFormatter: fmt,
     chartMode,
     defaultMode: 'bar',
+    renderTitleInChart: false,
   });
 
   return (
     <div className="model-detail-wrap">
       <div className="model-detail-charts">
         <div className="model-detail-donut">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Sessions by effort</div>
           <ReactEChartsCore echarts={echarts} option={runsOption} style={{ width: '100%', height: '100%' }} theme="dark" />
         </div>
         <div className="model-detail-donut">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Tokens by effort</div>
           <ReactEChartsCore echarts={echarts} option={tokensOption} style={{ width: '100%', height: '100%' }} theme="dark" />
         </div>
         <div className="model-detail-bar">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Avg tokens per session</div>
           <ReactEChartsCore echarts={echarts} option={perRunOption} style={{ width: '100%', height: '100%' }} theme="dark" />
         </div>
       </div>
@@ -117,7 +123,7 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
                   className="model-detail-swatch"
                   style={{ background: getEffortColor(row.effort) }}
                 />
-                <span>{row.effort}</span>
+                <span className="model-detail-summary-name" title={row.effort}>{row.effort}</span>
               </div>
               <div className="model-detail-summary-line">{row.sessions} sessions</div>
               <div className="model-detail-summary-line">{fmt(row.tokens)} tokens</div>

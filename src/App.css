@@ -193,19 +193,6 @@ body {
 }
 .range-btn:hover { color: var(--text-secondary); }
 .range-btn.active { color: #fff; background: var(--accent); }
-.chart-mode-select {
-  padding: 0.28rem 0.7rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-.chart-mode-select:focus {
-  outline: none;
-  border-color: var(--accent);
-}
 
 /* ─── Heatmap ─── */
 .heatmap-wrap {
@@ -354,7 +341,7 @@ body {
 .model-detail-toggle-arrow.expanded { transform: rotate(180deg); }
 .model-detail-charts {
   display: flex;
-  gap: 1.5rem;
+  gap: 0.25rem;
   flex-wrap: wrap;
   align-items: flex-start;
   width: 100%;
@@ -369,13 +356,36 @@ body {
   height: 200px;
   overflow: visible;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+.model-detail-donut .chart-title { flex-shrink: 0; }
+.model-detail-donut .echarts-for-react { flex: 1; min-height: 0; }
+/* Detail donuts: larger container so labels fit within canvas (canvas clips by default)
+   ECharts/zrender: overflow:hidden on viewport - override so SVG/DOM labels show.
+   See: https://github.com/apache/echarts/issues/17558, https://github.com/apache/echarts/issues/4082 */
+.model-detail-wrap .model-detail-donut {
+  flex: 0 0 340px;
+  width: 340px;
+  min-width: 340px;
+  height: 220px;
+}
+.model-detail-donut .echarts-for-react,
+.model-detail-donut .echarts-for-react > div,
+.model-detail-bar .echarts-for-react,
+.model-detail-bar .echarts-for-react > div {
+  overflow: visible !important;
 }
 .model-detail-bar {
   flex: 1 1 300px;
   min-width: 300px;
   height: 200px;
   overflow: visible;
+  display: flex;
+  flex-direction: column;
 }
+.model-detail-bar .chart-title { flex-shrink: 0; }
+.model-detail-bar .echarts-for-react { flex: 1; min-height: 0; }
 .model-detail-summary-wrap {
   max-height: 0;
   overflow: hidden;
@@ -405,6 +415,13 @@ body {
   font-weight: 600;
   color: var(--text-primary);
   text-transform: capitalize;
+  min-width: 0;
+}
+.model-detail-summary-head .model-detail-summary-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .model-detail-swatch {
   width: 9px;

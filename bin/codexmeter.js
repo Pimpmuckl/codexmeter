@@ -25,6 +25,7 @@ const app = createServer(opts.codexHome, {
   repo: opts.repo,
   agentFamily: opts.agentFamily,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  devApiOnly: process.env.CODEXMETER_DEV_API_ONLY === '1',
 });
 
 const port = parseInt(opts.port, 10) || 0;

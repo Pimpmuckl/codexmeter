@@ -2,12 +2,12 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor, getFamilyColor, getRepoColor } from '../utils/colors';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
-echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
+echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
 
 function fmt(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
@@ -54,6 +54,7 @@ function DayDetail({ day, chartMode }) {
     valueFormatter: fmt,
     chartMode,
     defaultMode: 'donut',
+    renderTitleInChart: false,
   });
 
   const repoOption = buildDistributionOption({
@@ -64,33 +65,18 @@ function DayDetail({ day, chartMode }) {
     valueFormatter: fmt,
     chartMode,
     defaultMode: 'donut',
+    renderTitleInChart: false,
   });
 
   return (
     <div className="model-detail-wrap">
-      <div className="detail-summary-grid">
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Day</div>
-          <div className="detail-summary-value">{day.date}</div>
-        </div>
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Tokens</div>
-          <div className="detail-summary-value">{fmt(day.tokens)}</div>
-        </div>
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Time</div>
-          <div className="detail-summary-value">{fmtHours(day.elapsed_seconds)}</div>
-        </div>
-        <div className="detail-summary-stat">
-          <div className="detail-summary-label">Cost</div>
-          <div className="detail-summary-value">{fmtCost(day.cost)}</div>
-        </div>
-      </div>
       <div className="model-detail-charts">
         <div className="model-detail-donut">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Repos for day</div>
           <ReactEChartsCore echarts={echarts} option={repoOption} style={{ width: '100%', height: '100%' }} theme="dark" />
         </div>
         <div className="model-detail-donut">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models for day</div>
           <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" />
         </div>
       </div>

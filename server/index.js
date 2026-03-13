@@ -9,8 +9,11 @@ export function createServer(codexHome, opts = {}) {
   const app = express();
   const state = createIngestState();
   const distDir = path.join(__dirname, '..', 'dist');
+  const apiOnly = opts.devApiOnly === true;
 
-  app.use(express.static(distDir));
+  if (!apiOnly) {
+    app.use(express.static(distDir));
+  }
 
   app.get('/api/progress', (_req, res) => {
     res.json({
@@ -82,9 +85,18 @@ export function createServer(codexHome, opts = {}) {
     });
   });
 
-  app.get('/{*splat}', (_req, res) => {
-    res.sendFile(path.join(distDir, 'index.html'));
-  });
+  if (!apiOnly) {
+    app.get('/{*splat}', (_req, res) => {
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
+  } else {
+    app.get('/', (_req, res) => {
+      res.type('text/plain').send('codexmeter dev backend is API-only. Open the Vite dev URL for the UI.');
+    });
+    app.get('/{*splat}', (_req, res) => {
+      res.status(404).type('text/plain').send('codexmeter dev backend is API-only. Open the Vite dev URL for the UI.');
+    });
+  }
 
   runIngest(codexHome, state, opts);
   return app;
