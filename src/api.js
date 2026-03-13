@@ -1,0 +1,16 @@
+async function fetchJson(endpoint) {
+  const res = await fetch(endpoint);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export const api = {
+  progress: () => fetchJson('/api/progress'),
+  overview: () => fetchJson('/api/overview'),
+  repos: () => fetchJson('/api/repos'),
+  models: () => fetchJson('/api/models'),
+  daily: () => fetchJson('/api/daily'),
+  sessions: (q = '') => fetchJson(`/api/sessions${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  heatmap: () => fetchJson('/api/heatmap'),
+  families: () => fetchJson('/api/families'),
+};
