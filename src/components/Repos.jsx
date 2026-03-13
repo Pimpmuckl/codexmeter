@@ -5,6 +5,7 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor } from '../utils/colors';
+import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
@@ -23,6 +24,7 @@ function fmtCost(n) {
 }
 
 const FAMILY_FILTERS = ['all', 'review', 'exploration', 'planning', 'memory', 'generic'];
+const FAMILY_ORDER = ['review', 'exploration', 'planning', 'memory', 'generic'];
 
 function exportChart(ref) {
   if (!ref.current) return;
@@ -130,9 +132,11 @@ export default function Repos({ data, chartMode = 'default' }) {
 
   const option = {
     backgroundColor: 'transparent',
+    ...ECHARTS_ANIMATION,
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      appendToBody: true,
       formatter: (p) => {
         const repo = top[top.length - 1 - p[0].dataIndex];
         return repo ? `<b>${repo.repo_label}</b><br/>Tokens: ${fmt(repo.tokens)}<br/>Cost: ${fmtCost(repo.cost)}<br/>Sessions: ${repo.sessions}` : '';
@@ -155,7 +159,7 @@ export default function Repos({ data, chartMode = 'default' }) {
       type: 'bar',
       data: reversed.map((r) => ({ value: r.tokens, itemStyle: { color: getRepoColor(r.repo_label), borderRadius: [0, 3, 3, 0] } })),
       barMaxWidth: 16,
-      label: { show: true, position: 'right', formatter: (p) => fmt(p.value), color: '#8b949e', fontSize: 10 },
+      label: { show: true, position: 'right', formatter: (p) => fmt(p.value), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
     }],
   };
 
@@ -202,7 +206,14 @@ export default function Repos({ data, chartMode = 'default' }) {
                   <td style={{ fontFamily: 'var(--font-mono)' }}>{fmtCost(r.cost)}</td>
                   <td>{r.sessions}</td>
                   <td>
-                    {Object.entries(r.by_family || {}).sort(([, a], [, b]) => b.tokens - a.tokens).slice(0, 3).map(([f]) => (
+                    {Object.entries(r.by_family || {})
+                      .sort(([a], [b]) => {
+                        const ia = FAMILY_ORDER.indexOf(a);
+                        const ib = FAMILY_ORDER.indexOf(b);
+                        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+                      })
+                      .slice(0, 3)
+                      .map(([f]) => (
                       <span key={f} className={`tag tag-${f}`} style={{ marginRight: 3 }}>{f}</span>
                     ))}
                   </td>

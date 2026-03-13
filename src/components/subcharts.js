@@ -1,3 +1,5 @@
+import { ECHARTS_ANIMATION, ECHARTS_DONUT_ANIMATION, ECHARTS_DETAIL_BAR_ANIMATION, ECHARTS_LABEL_ANIMATION, ECHARTS_DETAIL_BAR_LABEL_ANIMATION } from '../utils/echartsDefaults';
+
 export function resolveSubchartMode(chartMode, defaultMode) {
   return chartMode === 'default' ? defaultMode : chartMode;
 }
@@ -48,17 +50,17 @@ export function buildDistributionOption({
     const total = normalizedRows.reduce((s, r) => s + (r[valueKey] || 0), 0);
     const donutOpt = {
       backgroundColor: 'transparent',
+      ...ECHARTS_DONUT_ANIMATION,
       tooltip: {
         trigger: 'item',
-        formatter: (p) => `${p.name}: ${valueFormatter(p.value)} (${p.percent}%)`,
-        confine: false,
         appendToBody: true,
+        formatter: (p) => `${p.name}: ${valueFormatter(p.value)} (${p.percent}%)`,
       },
       series: [{
         type: 'pie',
         radius: ['40%', '62%'],
         center: ['50%', '52%'],
-        label: { show: true, color: '#8b949e', fontSize: 10, formatter: '{b}', overflow: 'truncate', width: 90 },
+        label: { show: true, color: '#8b949e', fontSize: 10, formatter: '{b}', overflow: 'truncate', width: 90, ...ECHARTS_LABEL_ANIMATION },
         labelLine: { lineStyle: { color: '#30363d' } },
         itemStyle: { borderColor: '#161b22', borderWidth: 2 },
         data: normalizedRows.map((row) => {
@@ -85,9 +87,11 @@ export function buildDistributionOption({
   const maxValue = Math.max(...normalizedRows.map((row) => row[valueKey] || 0), 0);
   const barOpt = {
     backgroundColor: 'transparent',
+    ...ECHARTS_DETAIL_BAR_ANIMATION,
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      appendToBody: true,
       formatter: (params) => {
         const idx = params?.[0]?.dataIndex;
         const row = reversed[idx];
@@ -132,6 +136,7 @@ export function buildDistributionOption({
         formatter: (p) => valueFormatter(p.value),
         color: '#8b949e',
         fontSize: 9,
+        ...ECHARTS_DETAIL_BAR_LABEL_ANIMATION,
       },
     }],
   };

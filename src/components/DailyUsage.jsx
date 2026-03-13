@@ -5,6 +5,7 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor, getFamilyColor, getRepoColor } from '../utils/colors';
+import { ECHARTS_ANIMATION } from '../utils/echartsDefaults';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
@@ -129,14 +130,15 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      appendToBody: true,
+      //confine:true,
       formatter: (params) => {
         let html = `<b>${params[0].axisValue}</b><br/>`;
         let total = 0;
-        for (const p of params) {
-          if (p.value > 0) {
-            html += `${p.marker} ${p.seriesName}: ${curMetric.fn(p.value)}<br/>`;
-            total += p.value;
-          }
+        const sorted = [...params].filter((p) => p.value > 0).sort((a, b) => (b.value || 0) - (a.value || 0));
+        for (const p of sorted) {
+          html += `${p.marker} ${p.seriesName}: ${curMetric.fn(p.value)}<br/>`;
+          total += p.value;
         }
         html += `<b>Total: ${curMetric.fn(total)}</b>`;
         return html;
@@ -156,8 +158,7 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
     xAxis: { type: 'category', data: dates, axisLabel: { color: '#484f58', fontSize: 10, rotate: 45 }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#30363d' } } },
     yAxis: { type: 'value', axisLabel: { formatter: (v) => curMetric.fn(v), color: '#484f58' }, splitLine: { lineStyle: { color: '#21262d' } } },
     series,
-    animationDuration: 600,
-    animationEasing: 'cubicOut',
+    ...ECHARTS_ANIMATION,
   };
 
   const selectedDay = daily.find((d) => d.date === selectedDate) || null;

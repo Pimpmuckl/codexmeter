@@ -5,6 +5,7 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor, getEffortColor } from '../utils/colors';
+import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
 import { buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
@@ -160,7 +161,8 @@ export default function Models({ data, chartMode = 'default' }) {
 
   const option = {
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: p => {
+    ...ECHARTS_ANIMATION,
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, appendToBody: true, formatter: p => {
       const m = models[models.length - 1 - p[0].dataIndex];
       return `<b>${m.model_name}</b><br/>Tokens: ${fmt(m.tokens)}<br/>Cost: ${fmtCost(m.cost)}<br/>Sessions: ${m.sessions}`;
     }},
@@ -184,7 +186,7 @@ export default function Models({ data, chartMode = 'default' }) {
         itemStyle: { color: getModelColor(m.model_name), borderRadius: [0, 3, 3, 0] },
       })),
       barMaxWidth: 18,
-      label: { show: true, position: 'right', formatter: p => fmt(p.value), color: '#8b949e', fontSize: 10 },
+      label: { show: true, position: 'right', formatter: p => fmt(p.value), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
     }],
   };
 

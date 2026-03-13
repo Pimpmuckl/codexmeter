@@ -108,7 +108,7 @@ body {
 }
 
 /* ─── Main ─── */
-.main-content { flex: 1; padding: 1.5rem 2rem 3rem; max-width: 1400px; margin: 0 auto; width: 100%; }
+.main-content { flex: 1; padding: 1.5rem 2rem 3rem; max-width: 1400px; margin: 0 auto; width: 100%; min-width: 0; container-type: inline-size; container-name: main; }
 .app-footer {
   padding: 0.75rem 2rem 1rem;
   font-size: 0.7rem;
@@ -132,10 +132,25 @@ body {
 
 /* ─── Stat Cards ─── */
 .stat-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: stretch;
   margin-bottom: 1.5rem;
+}
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 0.75rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* Graph wrapped to own row: stat cards fill the row */
+@media (max-width: 920px) {
+  .stat-cards { flex: 1 1 auto; grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+}
+@media (max-width: 500px) {
+  .stat-cards { grid-template-columns: 1fr; }
 }
 .stat-card {
   background: var(--bg-card);
@@ -270,8 +285,9 @@ body {
 .export-btn:hover { opacity: 1 !important; color: var(--text-primary); border-color: var(--accent); }
 
 /* ─── Grid ─── */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem; }
-.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-bottom: 1.5rem; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem; min-width: 0; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; min-width: 0; }
+.grid-3 > .chart-card { min-width: 0; overflow: hidden; }
 @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } .grid-3 { grid-template-columns: 1fr; } }
 
 /* ─── Buttons ─── */
@@ -289,6 +305,52 @@ body {
 }
 .btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
 .btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+/* ─── Overview daily spark (small, fills remainder when same row) ─── */
+.overview-daily-spark {
+  flex: 1 1 140px;
+  min-width: 140px;
+  min-height: 0;
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: visible;
+}
+.overview-daily-spark-title {
+  position: absolute;
+  top: 1rem;
+  left: 1.1rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  z-index: 1;
+  pointer-events: none;
+}
+.overview-daily-spark-chart {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.overview-daily-spark-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.overview-daily-spark-empty-text {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+/* When wrapped to own row (< 200px left): full width */
+@media (max-width: 920px) {
+  .overview-daily-spark {
+    flex: 1 1 100%;
+    min-width: 100%;
+    min-height: 140px;
+  }
+}
 
 /* ─── Table ─── */
 .table-wrap {
@@ -615,4 +677,12 @@ html { scrollbar-width: none; }
   padding: 0.12rem 0.45rem;
   border-radius: 3px;
   animation: pulse 2s infinite;
+}
+
+/* ECharts tooltip - stay within viewport when appendToBody */
+.echarts-tooltip,
+[class*="ec-component-tooltip"] {
+  max-width: 90vw !important;
+  max-height: 80vh !important;
+  overflow: auto !important;
 }

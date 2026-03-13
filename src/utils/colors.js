@@ -70,6 +70,17 @@ export function getRepoColor(repoLabel) {
   return REPO_PALETTE[idx];
 }
 
+/** Returns white or dark color for readable text on the given background hex */
+export function getContrastLabelColor(hex) {
+  const m = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  if (!m) return '#ffffff';
+  const r = parseInt(m[1], 16) / 255;
+  const g = parseInt(m[2], 16) / 255;
+  const b = parseInt(m[3], 16) / 255;
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return luminance > 0.5 ? '#1f2937' : '#ffffff';
+}
+
 /** HSL to hex; h in [0,360), s and l in [0,100] */
 function hslToHex(h, s, l) {
   s /= 100; l /= 100;
