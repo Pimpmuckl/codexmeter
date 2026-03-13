@@ -117,6 +117,8 @@ export default function Overview({ data, heatmap, families, repos }) {
 
   const d = ov[range] || ov.total || {};
   const cov = d.coverage || {};
+  const threadRows = cov.thread_rows ?? cov.total ?? 0;
+  const rootSessions = cov.root_sessions ?? d.total_sessions ?? 0;
 
   const topRepos = repos?.data?.slice(0, 6) || [];
   const topFamilies = families?.data || [];
@@ -180,7 +182,7 @@ export default function Overview({ data, heatmap, families, repos }) {
         <div className="stat-card">
           <div className="stat-label">Tokens</div>
           <div className="stat-value">{fmt(d.total_tokens)}</div>
-          <div className="stat-sub">{d.total_sessions?.toLocaleString()} sessions</div>
+          <div className="stat-sub">{rootSessions.toLocaleString()} root sessions</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Agent Time</div>
@@ -191,7 +193,7 @@ export default function Overview({ data, heatmap, families, repos }) {
           <div className="stat-label">Est. API Cost</div>
           <div className="stat-value">{fmtCost(d.total_cost)}</div>
           <div className="stat-sub">
-            {cov.priced}/{cov.total} priced · 95% cached
+            {cov.priced}/{threadRows} priced thread rows
           </div>
         </div>
         <div className="stat-card">
@@ -235,15 +237,19 @@ export default function Overview({ data, heatmap, families, repos }) {
         <span style={{ fontWeight: 500 }}>Coverage:</span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--accent)' }} />
-          {cov.enriched}/{cov.total} enriched
+          {cov.enriched}/{threadRows} enriched thread rows
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--green)' }} />
-          {cov.priced}/{cov.total} priced
+          {cov.priced}/{threadRows} priced thread rows
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--cyan)' }} />
-          {cov.time_valid}/{cov.total} timed
+          {cov.time_valid}/{threadRows} timed thread rows
+        </span>
+        <span className="coverage-item">
+          <span className="coverage-dot" style={{ background: 'var(--orange)' }} />
+          {rootSessions} root sessions
         </span>
       </div>
     </div>

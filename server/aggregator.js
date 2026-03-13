@@ -4,8 +4,9 @@ export function buildAggregates(sessions, tz) {
   const now = Date.now() / 1000;
   const d7 = now - 7 * 86400;
   const d30 = now - 30 * 86400;
+  const sessionView = buildSessionView(sessions);
 
-  const overview = buildOverview(sessions, d7, d30);
+  const overview = buildOverview(sessions, sessionView, d7, d30);
   const repos = buildRepos(sessions);
   const models = buildModels(sessions);
   const daily = buildDaily(sessions, tz);
@@ -15,14 +16,35 @@ export function buildAggregates(sessions, tz) {
   return { overview, repos, models, daily, heatmap, families };
 }
 
-function buildOverview(sessions, d7, d30) {
-  const buckets = { total: sessions, d7: [], d30: [] };
-  for (const s of sessions) {
-    if (s.started_at >= d7) buckets.d7.push(s);
-    if (s.started_at >= d30) buckets.d30.push(s);
+export function buildSessionView(sessions, allSessions = sessions) {
+  const grouped = new Map();
+  const rootLookup = new Map(allSessions.map(session => [session.thread_id, session]));
+
+  for (const session of sessions) {
+    const key = session.root_thread_id || session.thread_id;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(session);
   }
 
-  const calc = (arr) => {
+  return [...grouped.entries()]
+    .map(([rootThreadId, group]) => collapseSessionGroup(rootThreadId, group, rootLookup))
+    .sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+}
+
+function buildOverview(rawSessions, groupedSessions, d7, d30) {
+  const rawBuckets = { total: rawSessions, d7: [], d30: [] };
+  for (const session of rawSessions) {
+    if (overlapsLowerBound(session, d7)) rawBuckets.d7.push(session);
+    if (overlapsLowerBound(session, d30)) rawBuckets.d30.push(session);
+  }
+
+  const groupedBuckets = {
+    total: groupedSessions,
+    d7: groupedSessions.filter(session => overlapsLowerBound(session, d7)),
+    d30: groupedSessions.filter(session => overlapsLowerBound(session, d30)),
+  };
+
+  const calc = (arr, groupedArr) => {
     let tokens = 0, cost = 0, elapsed = 0, priced = 0, timeValid = 0, enriched = 0;
     const repoSet = new Set(), modelSet = new Set();
     let earliest = Infinity, latest = -Infinity;
@@ -40,19 +62,26 @@ function buildOverview(sessions, d7, d30) {
     return {
       total_tokens: tokens,
       total_cost: cost,
-      total_sessions: arr.length,
+      total_sessions: groupedArr.length,
       active_repos: repoSet.size,
       active_models: modelSet.size,
       total_elapsed_seconds: elapsed,
       date_range: { from: earliest === Infinity ? null : earliest, to: latest === -Infinity ? null : latest },
-      coverage: { total: arr.length, enriched, priced, time_valid: timeValid },
+      coverage: {
+        total: arr.length,
+        thread_rows: arr.length,
+        root_sessions: groupedArr.length,
+        enriched,
+        priced,
+        time_valid: timeValid,
+      },
     };
   };
 
   return {
-    total: calc(buckets.total),
-    d7: calc(buckets.d7),
-    d30: calc(buckets.d30),
+    total: calc(rawBuckets.total, groupedBuckets.total),
+    d7: calc(rawBuckets.d7, groupedBuckets.d7),
+    d30: calc(rawBuckets.d30, groupedBuckets.d30),
     cost_assumptions: CACHE_ASSUMPTIONS,
   };
 }
@@ -62,7 +91,16 @@ function buildRepos(sessions) {
   for (const s of sessions) {
     const key = s.repo_label;
     if (!map.has(key)) {
-      map.set(key, { repo_key: s.repo_key, repo_label: key, tokens: 0, cost: 0, cost_known: 0, sessions: 0, by_model: {}, by_family: {} });
+      map.set(key, {
+        repo_key: s.repo_key,
+        repo_label: key,
+        tokens: 0,
+        cost: 0,
+        cost_known: 0,
+        sessions: 0,
+        by_model: {},
+        by_family: {},
+      });
     }
     const r = map.get(key);
     r.tokens += s.tokens_used;
@@ -206,4 +244,74 @@ function toDayKey(ms, tz) {
 function dayStartMs(dayKey) {
   const [y, m, d] = dayKey.split('-').map(Number);
   return new Date(y, m - 1, d).getTime();
+}
+
+function overlapsLowerBound(session, lowerBound) {
+  const startedAt = session.started_at || 0;
+  const endedAt = session.ended_at || startedAt;
+  return endedAt >= lowerBound;
+}
+
+function collapseSessionGroup(rootThreadId, group, rootLookup) {
+  const sorted = [...group].sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
+  const root = rootLookup.get(rootThreadId) || group.find(s => s.thread_id === rootThreadId) || sorted[0];
+  const rootIncluded = group.some(session => session.thread_id === root.thread_id);
+  const repoLabels = new Set(group.map(s => s.repo_label).filter(Boolean));
+  const modelNames = new Set(group.map(s => s.model_name).filter(Boolean));
+  const efforts = new Set(group.map(s => s.reasoning_effort).filter(Boolean));
+  const agentRoles = new Set(group.map(s => s.agent_role).filter(Boolean));
+  const agentNicknames = new Set(group.map(s => s.agent_nickname).filter(Boolean));
+  const titles = new Set(group.map(s => s.title).filter(Boolean));
+
+  let startedAt = Infinity;
+  let endedAt = -Infinity;
+  let tokensUsed = 0;
+  let cost = 0;
+  let hasCost = false;
+  const agentFamilySet = new Set();
+
+  for (const session of group) {
+    if (session.started_at && session.started_at < startedAt) startedAt = session.started_at;
+    if (session.ended_at && session.ended_at > endedAt) endedAt = session.ended_at;
+    tokensUsed += session.tokens_used || 0;
+    if (session.cost !== null) {
+      cost += session.cost;
+      hasCost = true;
+    }
+    if (session.agent_family) agentFamilySet.add(session.agent_family);
+  }
+
+  const rootStartedAt = startedAt === Infinity ? root.started_at : startedAt;
+  const rootEndedAt = endedAt === -Infinity ? root.ended_at : endedAt;
+
+  return {
+    thread_id: root.thread_id,
+    root_thread_id: rootThreadId,
+    repo_label: repoLabels.size === 1 ? [...repoLabels][0] : (root.repo_label || 'mixed'),
+    model_name: root.model_name || pickSummaryValue(modelNames),
+    reasoning_effort: root.reasoning_effort || pickSummaryValue(efforts),
+    agent_role: root.agent_role,
+    agent_nickname: root.agent_nickname,
+    agent_family: root.agent_family,
+    is_subagent: false,
+    started_at: rootStartedAt,
+    ended_at: rootEndedAt,
+    elapsed_seconds: rootStartedAt && rootEndedAt && rootEndedAt > rootStartedAt ? (rootEndedAt - rootStartedAt) : root.elapsed_seconds,
+    tokens_used: tokensUsed,
+    cost: hasCost ? cost : null,
+    title: root.title,
+    thread_count: group.length,
+    subagent_count: group.length - (rootIncluded ? 1 : 0),
+    descendant_models: [...modelNames],
+    descendant_families: [...agentFamilySet],
+    descendant_roles: [...agentRoles],
+    descendant_nicknames: [...agentNicknames],
+    related_titles: [...titles].slice(0, 5),
+  };
+}
+
+function pickSummaryValue(values) {
+  if (values.size === 0) return null;
+  if (values.size === 1) return [...values][0];
+  return `${[...values][0]} +${values.size - 1}`;
 }

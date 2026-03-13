@@ -11,6 +11,7 @@ export async function enrichFromRollout(rolloutPath) {
     reasoning_effort: null,
     first_timestamp: null,
     last_timestamp: null,
+    parent_thread_id: null,
   };
 
   try {
@@ -52,13 +53,17 @@ export async function enrichFromRollout(rolloutPath) {
 
         if (obj.type === 'session_meta' && obj.payload) {
           if (obj.payload.model && !result.model_name) result.model_name = obj.payload.model;
+          if (!result.parent_thread_id) {
+            result.parent_thread_id =
+              obj.payload?.source?.subagent?.thread_spawn?.parent_thread_id ||
+              obj.payload?.forked_from_id ||
+              null;
+          }
         }
       } catch {
         // malformed line
       }
 
-      // Read up to 150 lines for model/effort, but continue for timestamps
-      if (linesRead > 150 && result.model_name && result.reasoning_effort) break;
     }
   } catch {
     return null;

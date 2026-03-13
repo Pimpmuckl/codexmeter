@@ -5,7 +5,7 @@ import {
   classifyAgentFamily, isSubagent, normalizeModelName,
 } from './normalize.js';
 import { estimateCost } from './cost-catalog.js';
-import { buildAggregates } from './aggregator.js';
+import { buildAggregates, buildSessionView } from './aggregator.js';
 
 export function createIngestState() {
   return {
@@ -97,6 +97,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         if (data) {
           if (data.model_name) s.model_name = normalizeModelName(data.model_name);
           if (data.reasoning_effort) s.reasoning_effort = data.reasoning_effort;
+          if (data.parent_thread_id) s.parent_thread_id = data.parent_thread_id;
 
           if (data.first_timestamp && data.last_timestamp) {
             const rolloutDuration = (data.last_timestamp - data.first_timestamp) / 1000;
@@ -111,6 +112,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       state.percent = 0.25 + (state.enriched / candidates.length) * 0.60;
 
       if (state.enriched % 200 < BATCH_SIZE) {
+        assignRootThreadIds(sessions);
         rebuildAggregates(sessions, state, opts, tz);
       }
     }
@@ -124,6 +126,8 @@ export async function runIngest(codexHome, state, opts = {}) {
       }
       s.cost = estimateCost(s.model_name, s.tokens_used);
     }
+
+    assignRootThreadIds(sessions);
 
     state.phase = 'aggregation';
     state.percent = 0.92;
@@ -143,7 +147,7 @@ export async function runIngest(codexHome, state, opts = {}) {
 
 function rebuildAggregates(sessions, state, opts, tz) {
   const filtered = applyFilters(sessions, opts);
-  state.sessions = filtered;
+  state.sessions = buildSessionView(filtered, sessions);
   state.aggregates = buildAggregates(filtered, tz);
   state.generated_at = new Date().toISOString();
 }
@@ -168,4 +172,49 @@ function applyFilters(sessions, opts) {
     result = result.filter(s => s.agent_family === opts.agentFamily);
   }
   return result;
+}
+
+function assignRootThreadIds(sessions) {
+  const byId = new Map(sessions.map(session => [session.thread_id, session]));
+  const memo = new Map();
+
+  const resolveRoot = (session) => {
+    if (!session) return null;
+    if (memo.has(session.thread_id)) return memo.get(session.thread_id);
+
+    const trail = [];
+    const seen = new Set();
+    let current = session;
+    let rootId = session.thread_id;
+
+    while (current) {
+      trail.push(current.thread_id);
+      const parentId = current.parent_thread_id;
+
+      if (!parentId || parentId === current.thread_id || seen.has(parentId)) {
+        rootId = current.thread_id;
+        break;
+      }
+
+      if (memo.has(parentId)) {
+        rootId = memo.get(parentId);
+        break;
+      }
+
+      seen.add(parentId);
+      const parent = byId.get(parentId);
+      if (!parent) {
+        rootId = parentId;
+        break;
+      }
+      current = parent;
+    }
+
+    for (const threadId of trail) memo.set(threadId, rootId);
+    return rootId;
+  };
+
+  for (const session of sessions) {
+    session.root_thread_id = resolveRoot(session) || session.thread_id;
+  }
 }

@@ -52,18 +52,29 @@ export function createServer(codexHome, opts = {}) {
         (s.model_name?.toLowerCase().includes(q)) ||
         (s.agent_role?.toLowerCase().includes(q)) ||
         (s.agent_nickname?.toLowerCase().includes(q)) ||
-        (s.title?.toLowerCase().includes(q))
+        (s.title?.toLowerCase().includes(q)) ||
+        (s.descendant_models || []).some(v => v?.toLowerCase().includes(q)) ||
+        (s.descendant_families || []).some(v => v?.toLowerCase().includes(q)) ||
+        (s.descendant_roles || []).some(v => v?.toLowerCase().includes(q)) ||
+        (s.descendant_nicknames || []).some(v => v?.toLowerCase().includes(q)) ||
+        (s.related_titles || []).some(v => v?.toLowerCase().includes(q))
       );
     }
     res.json({
       data: sessions.map(s => ({
-        thread_id: s.thread_id, repo_label: s.repo_label,
+        thread_id: s.thread_id, root_thread_id: s.root_thread_id, repo_label: s.repo_label,
         model_name: s.model_name, reasoning_effort: s.reasoning_effort,
         agent_role: s.agent_role, agent_nickname: s.agent_nickname,
         agent_family: s.agent_family, is_subagent: s.is_subagent,
         started_at: s.started_at, ended_at: s.ended_at,
         elapsed_seconds: s.elapsed_seconds, tokens_used: s.tokens_used,
         cost: s.cost, title: s.title,
+        thread_count: s.thread_count, subagent_count: s.subagent_count,
+        descendant_models: s.descendant_models,
+        descendant_families: s.descendant_families,
+        descendant_roles: s.descendant_roles,
+        descendant_nicknames: s.descendant_nicknames,
+        related_titles: s.related_titles,
       })),
       complete: state.complete,
       coverage: state.aggregates?.overview?.total?.coverage || { total: 0, enriched: 0, priced: 0, time_valid: 0 },

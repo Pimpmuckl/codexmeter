@@ -33,7 +33,12 @@ export default function Sessions({ data }) {
       (s.model_name || '').toLowerCase().includes(q) ||
       (s.agent_role || '').toLowerCase().includes(q) ||
       (s.agent_nickname || '').toLowerCase().includes(q) ||
-      (s.title || '').toLowerCase().includes(q)
+      (s.title || '').toLowerCase().includes(q) ||
+      (s.descendant_models || []).some(v => (v || '').toLowerCase().includes(q)) ||
+      (s.descendant_families || []).some(v => (v || '').toLowerCase().includes(q)) ||
+      (s.descendant_roles || []).some(v => (v || '').toLowerCase().includes(q)) ||
+      (s.descendant_nicknames || []).some(v => (v || '').toLowerCase().includes(q)) ||
+      (s.related_titles || []).some(v => (v || '').toLowerCase().includes(q))
     );
   }, [data, search]);
 
@@ -41,7 +46,16 @@ export default function Sessions({ data }) {
     ch.accessor('started_at', { header: 'Time', cell: i => fmtTime(i.getValue()), size: 130 }),
     ch.accessor('repo_label', { header: 'Repo', cell: i => i.getValue() || '—', size: 140 }),
     ch.accessor('model_name', { header: 'Model', cell: i => <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>{i.getValue() || '?'}</span>, size: 130 }),
-    ch.accessor('agent_family', { header: 'Family', cell: i => <span className={`tag ${FAMILY_TAG[i.getValue()] || 'tag-generic'}`}>{i.getValue()}</span>, size: 100 }),
+    ch.accessor('thread_count', {
+      header: 'Threads',
+      cell: i => {
+        const count = i.getValue() || 1;
+        const row = i.row.original;
+        return count > 1 ? `${count} (${row.subagent_count || 0} sub)` : '1';
+      },
+      size: 92,
+    }),
+    ch.accessor('agent_family', { header: 'Root', cell: i => <span className={`tag ${FAMILY_TAG[i.getValue()] || 'tag-generic'}`}>{i.getValue()}</span>, size: 100 }),
     ch.accessor('agent_nickname', { header: 'Agent', cell: i => i.getValue() || '—', size: 85 }),
     ch.accessor('reasoning_effort', { header: 'Effort', cell: i => i.getValue() || '—', size: 70 }),
     ch.accessor('elapsed_seconds', { header: 'Duration', cell: i => fmtDur(i.getValue()), size: 85 }),
@@ -61,7 +75,7 @@ export default function Sessions({ data }) {
           <input placeholder="Search sessions..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.4rem 1rem', borderBottom: '1px solid var(--border)' }}>
-          {rows.length.toLocaleString()} sessions
+          {rows.length.toLocaleString()} root sessions
           {data && !data.complete && <span className="incomplete-badge" style={{ marginLeft: '0.5rem' }}>partial</span>}
         </div>
         <div ref={parentRef} style={{ height: '600px', overflow: 'auto' }}>
