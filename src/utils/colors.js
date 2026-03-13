@@ -44,6 +44,27 @@ const FAMILY_COLORS = {
   generic:     '#64748b',
 };
 
+const EFFORT_COLORS = {
+  low:       '#10b981',
+  medium:    '#06b6d4',
+  high:      '#f59e0b',
+  xhigh:     '#a855f7',
+  'x-high':  '#a855f7',
+  unknown:   '#64748b',
+};
+
+/** Canonical effort key for consistent color mapping across models */
+export function normalizeEffortKey(effort) {
+  if (!effort) return 'unknown';
+  const k = String(effort).toLowerCase().trim().replace(/-/g, '');
+  if (k === 'low') return 'low';
+  if (k === 'medium') return 'medium';
+  if (k === 'high') return 'high';
+  if (k === 'xhigh') return 'xhigh';
+  if (k === 'unknown') return 'unknown';
+  return k;
+}
+
 export function getRepoColor(repoLabel) {
   const idx = hashStr(repoLabel) % REPO_PALETTE.length;
   return REPO_PALETTE[idx];
@@ -69,6 +90,11 @@ export function getModelColor(modelName) {
 
 export function getFamilyColor(family) {
   return FAMILY_COLORS[family] || '#64748b';
+}
+
+export function getEffortColor(effort) {
+  const key = normalizeEffortKey(effort);
+  return EFFORT_COLORS[key] ?? '#64748b';
 }
 
 export function getModelColorMap(modelNames) {

@@ -1,5 +1,15 @@
 import { CACHE_ASSUMPTIONS } from './cost-catalog.js';
 
+function normalizeEffortKey(effort) {
+  if (!effort) return 'unknown';
+  const k = String(effort).toLowerCase().trim().replace(/-/g, '');
+  if (k === 'low') return 'low';
+  if (k === 'medium') return 'medium';
+  if (k === 'high') return 'high';
+  if (k === 'xhigh') return 'xhigh';
+  return k || 'unknown';
+}
+
 export function buildAggregates(sessions, tz) {
   const now = Date.now() / 1000;
   const d7 = now - 7 * 86400;
@@ -161,7 +171,7 @@ function buildModels(sessions) {
       if (s.cost_source === 'heuristic') m.heuristic_priced++;
     }
     m.sessions++;
-    const eKey = s.reasoning_effort || 'unknown';
+    const eKey = normalizeEffortKey(s.reasoning_effort);
     if (!m.by_effort[eKey]) m.by_effort[eKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
     m.by_effort[eKey].tokens += s.tokens_used;
     if (s.cost !== null) {

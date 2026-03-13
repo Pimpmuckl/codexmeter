@@ -34,12 +34,12 @@ export async function runIngest(codexHome, state, opts = {}) {
     const threads = readThreads(codexHome, ({ total, read }) => {
       state.total_threads = total;
       state.inventoried = read;
-      state.percent = (read / total) * 0.2;
+      state.percent = total > 0 ? (read / total) * 0.08 : 0;
     });
 
     state.inventoried = threads.length;
     state.total_threads = threads.length;
-    state.percent = 0.2;
+    state.percent = 0;
     state.phase = 'normalizing';
 
     await initPricing();
@@ -73,7 +73,6 @@ export async function runIngest(codexHome, state, opts = {}) {
       });
     }
 
-    state.percent = 0.25;
     state.phase = 'enrichment';
 
     const candidates = sessions
@@ -81,6 +80,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       .sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
 
     state.needs_enrichment = candidates.length;
+    state.percent = candidates.length > 0 ? 0 : 0.90;
     const BATCH_SIZE = 25;
 
     for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
@@ -114,7 +114,9 @@ export async function runIngest(codexHome, state, opts = {}) {
       }
 
       state.enriched = Math.min(i + BATCH_SIZE, candidates.length);
-      state.percent = 0.25 + (state.enriched / candidates.length) * 0.60;
+      state.percent = candidates.length > 0
+        ? (state.enriched / candidates.length) * 0.90
+        : 0.90;
 
       if (state.enriched % 200 < BATCH_SIZE) {
         assignRootThreadIds(sessions);
@@ -140,7 +142,7 @@ export async function runIngest(codexHome, state, opts = {}) {
     assignRootThreadIds(sessions);
 
     state.phase = 'aggregation';
-    state.percent = 0.92;
+    state.percent = state.needs_enrichment > 0 ? 0.95 : 0.90;
 
     rebuildAggregates(sessions, state, opts, tz);
     state.percent = 1;

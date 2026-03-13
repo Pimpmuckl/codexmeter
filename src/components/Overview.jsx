@@ -27,17 +27,6 @@ function fmtHours(sec) {
   return (sec / 3600).toFixed(1) + 'h';
 }
 
-function fmtDate(ts) {
-  if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-const RANGES = [
-  { key: 'd7', label: '7d' },
-  { key: 'd30', label: '30d' },
-  { key: 'total', label: 'All' },
-];
-
 const HEATMAP_METRICS = [
   { key: 'tokens', label: 'Tokens', fmt: fmt },
   { key: 'elapsed', label: 'Time', fmt: v => fmtHours(v) },
@@ -108,8 +97,7 @@ function Heatmap({ heatmapData }) {
   );
 }
 
-export default function Overview({ data, heatmap, families, repos, models }) {
-  const [range, setRange] = useState('d30');
+export default function Overview({ data, heatmap, families, repos, models, range = 'd30' }) {
 
   const ov = data?.data;
   if (!ov) return null;
@@ -118,6 +106,9 @@ export default function Overview({ data, heatmap, families, repos, models }) {
   const cov = d.coverage || {};
   const threadRows = cov.thread_rows ?? cov.total ?? 0;
   const rootSessions = cov.root_sessions ?? d.total_sessions ?? 0;
+
+  const dr = d.date_range;
+  const days = dr?.from != null && dr?.to != null ? Math.max(1, Math.ceil((dr.to - dr.from) / 86400)) : 1;
   const exactPriced = cov.priced_exact ?? 0;
   const fallbackPriced = cov.priced_fallback ?? 0;
   const unpriced = cov.unpriced ?? Math.max(threadRows - (cov.priced ?? 0), 0);
@@ -195,48 +186,26 @@ export default function Overview({ data, heatmap, families, repos, models }) {
 
   return (
     <div className="animate-in">
-      <div className="section-header">
-        <span className="section-title">Usage Snapshot</span>
-        <div className="range-toggle">
-          {RANGES.map(r => (
-            <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)}>
-              {r.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className="stat-row">
         <div className="stat-card">
           <div className="stat-label">Tokens</div>
           <div className="stat-value">{fmt(d.total_tokens)}</div>
-          <div className="stat-sub">{rootSessions.toLocaleString()} root sessions</div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{fmt((d.total_tokens || 0) / days)}</span> per day</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Agent Time</div>
           <div className="stat-value">{fmtHours(d.total_elapsed_seconds)}</div>
-          <div className="stat-sub">{cov.time_valid} with timestamps</div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{fmtHours((d.total_elapsed_seconds || 0) / days)}</span> per day</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Est. API Cost</div>
           <div className="stat-value">{fmtCost(d.total_cost)}</div>
-          <div className="stat-sub">
-            {exactPriced} exact · {fallbackPriced} fallback
-          </div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{fmtCost((d.total_cost || 0) / days)}</span> per day</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Active Repos</div>
-          <div className="stat-value">{d.active_repos}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Models</div>
-          <div className="stat-value">{d.active_models}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Date Range</div>
-          <div className="stat-value" style={{ fontSize: '1rem' }}>
-            {fmtDate(d.date_range?.from)} — {fmtDate(d.date_range?.to)}
-          </div>
+          <div className="stat-label">Sessions</div>
+          <div className="stat-value">{rootSessions.toLocaleString()}</div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{(rootSessions / days).toFixed(1)}</span> per day</div>
         </div>
       </div>
 

@@ -8,6 +8,17 @@ import Sessions from './components/Sessions';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
+const RANGES = [
+  { key: 'd7', label: '7d' },
+  { key: 'd30', label: '30d' },
+  { key: 'total', label: 'All' },
+];
+
+function fmtDate(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 const PHASE_LABELS = {
   idle: 'Starting...',
   inventory: 'Reading threads',
@@ -20,6 +31,7 @@ const PHASE_LABELS = {
 export default function App() {
   const [progress, setProgress] = useState(null);
   const [tab, setTab] = useState('Overview');
+  const [range, setRange] = useState('d30');
   const [data, setData] = useState({});
   const [showOverlay, setShowOverlay] = useState(true);
   const [fadingOut, setFadingOut] = useState(false);
@@ -74,6 +86,10 @@ export default function App() {
   const complete = progress?.complete;
   const pct = Math.round((progress?.percent || 0) * 100);
 
+  const ov = data?.overview?.data;
+  const d = ov?.[range] || ov?.total || {};
+  const dateRange = d?.date_range;
+
   return (
     <div className="app">
       {showOverlay && (
@@ -89,30 +105,56 @@ export default function App() {
               {progress.current_date_bucket && ` — ${progress.current_date_bucket}`}
             </div>
           )}
+          <div className="loading-footer">Made with <span className="loading-heart">♥</span> by JJ</div>
         </div>
       )}
 
-      <nav className="navbar">
-        <span className="navbar-brand">CodexMeter</span>
-        <div className="navbar-tabs">
-          {TABS.map(t => (
-            <button key={t} className={`navbar-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="navbar-meta">
-          {!complete && <span className="incomplete-badge">ingesting {pct}%</span>}
-          <span className="navbar-status">{complete ? 'snapshot ready' : ''}</span>
-        </div>
-      </nav>
+      <div className={`app-content ${fadingOut || !showOverlay ? 'app-content-revealed' : ''}`}>
+        <nav className="navbar">
+          <div className="navbar-inner">
+          <span className="navbar-brand">CodexMeter</span>
+          <div className="navbar-tabs">
+            {TABS.map(t => (
+              <button key={t} className={`navbar-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="navbar-meta">
+            {!complete && (
+              <>
+                <div className="navbar-progress-wrap">
+                  <div className="navbar-progress-bar" style={{ width: `${pct}%` }} />
+                </div>
+                <span className="incomplete-badge">ingesting {pct}%</span>
+              </>
+            )}
+            {dateRange && (
+              <>
+                <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                  {fmtDate(dateRange.from)} — {fmtDate(dateRange.to)}
+                </span>
+                <div className="range-toggle">
+                  {RANGES.map(r => (
+                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)}>
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          </div>
+        </nav>
 
-      <div className="main-content">
-        {tab === 'Overview' && <Overview data={data.overview} heatmap={data.heatmap} families={data.families} repos={data.repos} models={data.models} />}
-        {tab === 'Repos' && <Repos data={data.repos} />}
-        {tab === 'Models' && <Models data={data.models} />}
-        {tab === 'Daily' && <DailyUsage data={data.daily} />}
-        {tab === 'Sessions' && <Sessions data={data.sessions} />}
+        <div className="main-content">
+          {tab === 'Overview' && <Overview data={data.overview} heatmap={data.heatmap} families={data.families} repos={data.repos} models={data.models} range={range} />}
+          {tab === 'Repos' && <Repos data={data.repos} />}
+          {tab === 'Models' && <Models data={data.models} />}
+          {tab === 'Daily' && <DailyUsage data={data.daily} />}
+          {tab === 'Sessions' && <Sessions data={data.sessions} />}
+        </div>
+        <div className="app-footer">Made with <span className="loading-heart">♥</span> by JJ</div>
       </div>
     </div>
   );
