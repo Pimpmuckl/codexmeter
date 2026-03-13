@@ -1,4 +1,4 @@
-// Fallback pricing for models used in codex-cli/codex app lifetime (when online lookup fails or times out)
+// Local pricing catalog for models used in codex-cli/codex app lifetime.
 const FALLBACK = {
   'gpt-5.4':             { input: 2.50,  output: 15.00, cached_input: 0.25 },
   'gpt-5.3-codex':       { input: 2.00,  output: 10.00, cached_input: 0.20 },
@@ -19,7 +19,7 @@ const FALLBACK = {
   'gpt-3.5-turbo':       { input: 0.50,  output:  1.50, cached_input: 0.05 },
 };
 
-const PRICING_URL = process.env.CODEXMETER_PRICING_URL || 'https://raw.githubusercontent.com/openai/openai-cookbook/main/community/pricing.json';
+const PRICING_URL = process.env.CODEXMETER_PRICING_URL || null;
 
 function normalizeEntry(entry) {
   if (!entry || typeof entry !== 'object' || entry.input == null || entry.output == null) return null;
@@ -39,6 +39,8 @@ function normalizePricing(raw) {
 }
 
 export async function fetchPricing() {
+  if (!PRICING_URL) return FALLBACK;
+
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);

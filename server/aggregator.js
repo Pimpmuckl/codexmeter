@@ -45,13 +45,20 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
   };
 
   const calc = (arr, groupedArr) => {
-    let tokens = 0, cost = 0, elapsed = 0, priced = 0, timeValid = 0, enriched = 0;
+    let tokens = 0, cost = 0, elapsed = 0, priced = 0, exactPriced = 0, heuristicPriced = 0, unpriced = 0, timeValid = 0, enriched = 0;
     const repoSet = new Set(), modelSet = new Set();
     let earliest = Infinity, latest = -Infinity;
 
     for (const s of arr) {
       tokens += s.tokens_used;
-      if (s.cost !== null) { cost += s.cost; priced++; }
+      if (s.cost !== null) {
+        cost += s.cost;
+        priced++;
+        if (s.cost_source === 'exact') exactPriced++;
+        if (s.cost_source === 'heuristic') heuristicPriced++;
+      } else {
+        unpriced++;
+      }
       if (s.elapsed_seconds != null && s.elapsed_seconds > 0) { timeValid++; elapsed += s.elapsed_seconds; }
       if (s.model_name) { enriched++; modelSet.add(s.model_name); }
       repoSet.add(s.repo_label);
@@ -73,6 +80,9 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
         root_sessions: groupedArr.length,
         enriched,
         priced,
+        priced_exact: exactPriced,
+        priced_fallback: heuristicPriced,
+        unpriced,
         time_valid: timeValid,
       },
     };
@@ -97,6 +107,8 @@ function buildRepos(sessions) {
         tokens: 0,
         cost: 0,
         cost_known: 0,
+        exact_priced: 0,
+        heuristic_priced: 0,
         sessions: 0,
         by_model: {},
         by_family: {},
@@ -104,19 +116,32 @@ function buildRepos(sessions) {
     }
     const r = map.get(key);
     r.tokens += s.tokens_used;
-    if (s.cost !== null) { r.cost += s.cost; r.cost_known++; }
+    if (s.cost !== null) {
+      r.cost += s.cost;
+      r.cost_known++;
+      if (s.cost_source === 'exact') r.exact_priced++;
+      if (s.cost_source === 'heuristic') r.heuristic_priced++;
+    }
     r.sessions++;
 
     const mKey = s.model_name || 'unknown';
-    if (!r.by_model[mKey]) r.by_model[mKey] = { tokens: 0, cost: 0, sessions: 0 };
+    if (!r.by_model[mKey]) r.by_model[mKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
     r.by_model[mKey].tokens += s.tokens_used;
-    if (s.cost !== null) r.by_model[mKey].cost += s.cost;
+    if (s.cost !== null) {
+      r.by_model[mKey].cost += s.cost;
+      if (s.cost_source === 'exact') r.by_model[mKey].exact_priced++;
+      if (s.cost_source === 'heuristic') r.by_model[mKey].heuristic_priced++;
+    }
     r.by_model[mKey].sessions++;
 
     const fKey = s.agent_family;
-    if (!r.by_family[fKey]) r.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0 };
+    if (!r.by_family[fKey]) r.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
     r.by_family[fKey].tokens += s.tokens_used;
-    if (s.cost !== null) r.by_family[fKey].cost += s.cost;
+    if (s.cost !== null) {
+      r.by_family[fKey].cost += s.cost;
+      if (s.cost_source === 'exact') r.by_family[fKey].exact_priced++;
+      if (s.cost_source === 'heuristic') r.by_family[fKey].heuristic_priced++;
+    }
     r.by_family[fKey].sessions++;
   }
   return [...map.values()].sort((a, b) => b.tokens - a.tokens);
@@ -126,15 +151,24 @@ function buildModels(sessions) {
   const map = new Map();
   for (const s of sessions) {
     const key = s.model_name || 'unknown';
-    if (!map.has(key)) map.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, sessions: 0, by_effort: {} });
+    if (!map.has(key)) map.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0, by_effort: {} });
     const m = map.get(key);
     m.tokens += s.tokens_used;
-    if (s.cost !== null) { m.cost += s.cost; m.cost_known++; }
+    if (s.cost !== null) {
+      m.cost += s.cost;
+      m.cost_known++;
+      if (s.cost_source === 'exact') m.exact_priced++;
+      if (s.cost_source === 'heuristic') m.heuristic_priced++;
+    }
     m.sessions++;
     const eKey = s.reasoning_effort || 'unknown';
-    if (!m.by_effort[eKey]) m.by_effort[eKey] = { tokens: 0, cost: 0, sessions: 0 };
+    if (!m.by_effort[eKey]) m.by_effort[eKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
     m.by_effort[eKey].tokens += s.tokens_used;
-    if (s.cost !== null) m.by_effort[eKey].cost += s.cost;
+    if (s.cost !== null) {
+      m.by_effort[eKey].cost += s.cost;
+      if (s.cost_source === 'exact') m.by_effort[eKey].exact_priced++;
+      if (s.cost_source === 'heuristic') m.by_effort[eKey].heuristic_priced++;
+    }
     m.by_effort[eKey].sessions++;
   }
   return [...map.values()].sort((a, b) => b.tokens - a.tokens);
@@ -144,10 +178,14 @@ function buildFamilies(sessions) {
   const map = new Map();
   for (const s of sessions) {
     const key = s.agent_family;
-    if (!map.has(key)) map.set(key, { family: key, tokens: 0, cost: 0, sessions: 0 });
+    if (!map.has(key)) map.set(key, { family: key, tokens: 0, cost: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0 });
     const f = map.get(key);
     f.tokens += s.tokens_used;
-    if (s.cost !== null) f.cost += s.cost;
+    if (s.cost !== null) {
+      f.cost += s.cost;
+      if (s.cost_source === 'exact') f.exact_priced++;
+      if (s.cost_source === 'heuristic') f.heuristic_priced++;
+    }
     f.sessions++;
   }
   return [...map.values()].sort((a, b) => b.tokens - a.tokens);
@@ -283,6 +321,9 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
 
   const rootStartedAt = startedAt === Infinity ? root.started_at : startedAt;
   const rootEndedAt = endedAt === -Infinity ? root.ended_at : endedAt;
+  const exactPriced = group.filter(session => session.cost_source === 'exact').length;
+  const heuristicPriced = group.filter(session => session.cost_source === 'heuristic').length;
+  const availablePriced = exactPriced + heuristicPriced;
 
   return {
     thread_id: root.thread_id,
@@ -302,6 +343,11 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
     title: root.title,
     thread_count: group.length,
     subagent_count: group.length - (rootIncluded ? 1 : 0),
+    cost_source:
+      availablePriced === 0 ? 'unavailable'
+      : heuristicPriced === 0 ? 'exact'
+      : exactPriced === 0 ? 'heuristic'
+      : 'mixed',
     descendant_models: [...modelNames],
     descendant_families: [...agentFamilySet],
     descendant_roles: [...agentRoles],

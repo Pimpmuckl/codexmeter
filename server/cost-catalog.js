@@ -32,10 +32,41 @@ export function getCacheAwareRate(modelName) {
   return INPUT_FRACTION * effectiveInputRate + OUTPUT_FRACTION * entry.output;
 }
 
-export function estimateCost(modelName, tokensUsed) {
+function calculateCostFromUsage(modelName, usage) {
+  if (!modelName || !usage) return null;
+  const entry = getPricing()[modelName];
+  if (!entry) return null;
+
+  const inputTokens = usage.input_tokens || 0;
+  const cachedInputTokens = usage.cached_input_tokens || 0;
+  const outputTokens = usage.output_tokens || 0;
+  const uncachedInputTokens = Math.max(inputTokens - cachedInputTokens, 0);
+
+  return (
+    (uncachedInputTokens * entry.input) +
+    (cachedInputTokens * entry.cached_input) +
+    (outputTokens * entry.output)
+  ) / 1_000_000;
+}
+
+function estimateCostFromTotalTokens(modelName, tokensUsed) {
   const rate = getCacheAwareRate(modelName);
   if (rate === null) return null;
   return (tokensUsed / 1_000_000) * rate;
+}
+
+export function priceSession(modelName, { totalTokens = 0, usageBuckets = null } = {}) {
+  const exactCost = calculateCostFromUsage(modelName, usageBuckets);
+  if (exactCost !== null) {
+    return { cost: exactCost, source: 'exact' };
+  }
+
+  const heuristicCost = estimateCostFromTotalTokens(modelName, totalTokens);
+  if (heuristicCost !== null) {
+    return { cost: heuristicCost, source: 'heuristic' };
+  }
+
+  return { cost: null, source: 'unpriced' };
 }
 
 export function isModelPriced(modelName) {

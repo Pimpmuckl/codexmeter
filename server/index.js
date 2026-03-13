@@ -68,7 +68,7 @@ export function createServer(codexHome, opts = {}) {
         agent_family: s.agent_family, is_subagent: s.is_subagent,
         started_at: s.started_at, ended_at: s.ended_at,
         elapsed_seconds: s.elapsed_seconds, tokens_used: s.tokens_used,
-        cost: s.cost, title: s.title,
+        cost: s.cost, cost_source: s.cost_source, title: s.title,
         thread_count: s.thread_count, subagent_count: s.subagent_count,
         descendant_models: s.descendant_models,
         descendant_families: s.descendant_families,

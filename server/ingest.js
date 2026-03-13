@@ -4,7 +4,7 @@ import {
   normalizeCwd, deriveRepoKey, deriveRepoLabel,
   classifyAgentFamily, isSubagent, normalizeModelName,
 } from './normalize.js';
-import { initPricing, estimateCost } from './cost-catalog.js';
+import { initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
 
 export function createIngestState() {
@@ -60,12 +60,14 @@ export async function runIngest(codexHome, state, opts = {}) {
         model_provider: t.model_provider,
         model_name: null,
         reasoning_effort: null,
+        usage_total: null,
         agent_role: t.agent_role,
         agent_nickname: t.agent_nickname,
         agent_family: classifyAgentFamily(t.agent_role),
         is_subagent: isSubagent(t.agent_role),
         parent_thread_id: null,
         cost: null,
+        cost_source: 'unavailable',
         title: t.title,
         cli_version: t.cli_version,
       });
@@ -100,6 +102,7 @@ export async function runIngest(codexHome, state, opts = {}) {
           if (data.model_name) s.model_name = normalizeModelName(data.model_name);
           if (data.reasoning_effort) s.reasoning_effort = data.reasoning_effort;
           if (data.parent_thread_id) s.parent_thread_id = data.parent_thread_id;
+          if (data.usage_total) s.usage_total = data.usage_total;
 
           if (data.first_timestamp && data.last_timestamp) {
             const rolloutDuration = (data.last_timestamp - data.first_timestamp) / 1000;
@@ -126,7 +129,12 @@ export async function runIngest(codexHome, state, opts = {}) {
           s.elapsed_seconds = fallback;
         }
       }
-      s.cost = estimateCost(s.model_name, s.tokens_used);
+      const priced = priceSession(s.model_name, {
+        totalTokens: s.tokens_used,
+        usageBuckets: s.usage_total,
+      });
+      s.cost = priced.cost;
+      s.cost_source = priced.source;
     }
 
     assignRootThreadIds(sessions);

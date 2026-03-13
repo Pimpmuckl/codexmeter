@@ -363,9 +363,14 @@ tr:hover td { color: var(--text-primary); background: rgba(99, 102, 241, 0.03); 
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  min-width: 9.5rem;
   font-variant-numeric: tabular-nums;
 }
+.coverage-nums {
+  display: inline-block;
+  min-width: 9ch;
+  text-align: right;
+}
+.coverage-nums-single { min-width: 4ch; }
 .coverage-dot {
   width: 6px;
   height: 6px;

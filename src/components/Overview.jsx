@@ -24,9 +24,7 @@ function fmtCost(n) {
 
 function fmtHours(sec) {
   if (!sec) return '0h';
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return (sec / 3600).toFixed(1) + 'h';
 }
 
 function fmtDate(ts) {
@@ -120,6 +118,9 @@ export default function Overview({ data, heatmap, families, repos, models }) {
   const cov = d.coverage || {};
   const threadRows = cov.thread_rows ?? cov.total ?? 0;
   const rootSessions = cov.root_sessions ?? d.total_sessions ?? 0;
+  const exactPriced = cov.priced_exact ?? 0;
+  const fallbackPriced = cov.priced_fallback ?? 0;
+  const unpriced = cov.unpriced ?? Math.max(threadRows - (cov.priced ?? 0), 0);
 
   const topRepos = repos?.data?.slice(0, 6) || [];
   const topFamilies = families?.data || [];
@@ -127,7 +128,11 @@ export default function Overview({ data, heatmap, families, repos, models }) {
 
   const repoOption = {
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: params => params?.length ? `${params[0].axisValue}: ${fmt(params[0].value)} tokens` : '',
+    },
     grid: { left: 130, right: 20, top: 5, bottom: 5 },
     xAxis: { type: 'value', show: false },
     yAxis: {
@@ -216,7 +221,7 @@ export default function Overview({ data, heatmap, families, repos, models }) {
           <div className="stat-label">Est. API Cost</div>
           <div className="stat-value">{fmtCost(d.total_cost)}</div>
           <div className="stat-sub">
-            {cov.priced}/{threadRows} priced thread rows
+            {exactPriced} exact · {fallbackPriced} fallback
           </div>
         </div>
         <div className="stat-card">
@@ -268,19 +273,38 @@ export default function Overview({ data, heatmap, families, repos, models }) {
         <span style={{ fontWeight: 500 }}>Coverage:</span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--accent)' }} />
-          {cov.enriched}/{threadRows} enriched thread rows
+          <span className="coverage-nums">{cov.enriched}/{threadRows}</span>
+          {' '}enriched thread rows
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--green)' }} />
-          {cov.priced}/{threadRows} priced thread rows
+          <span className="coverage-nums">{cov.priced}/{threadRows}</span>
+          {' '}priced thread rows
+        </span>
+        <span className="coverage-item">
+          <span className="coverage-dot" style={{ background: '#22c55e' }} />
+          <span className="coverage-nums">{exactPriced}</span>
+          {' '}exact-priced
+        </span>
+        <span className="coverage-item">
+          <span className="coverage-dot" style={{ background: '#c084fc' }} />
+          <span className="coverage-nums">{fallbackPriced}</span>
+          {' '}fallback-priced
+        </span>
+        <span className="coverage-item">
+          <span className="coverage-dot" style={{ background: '#64748b' }} />
+          <span className="coverage-nums">{unpriced}</span>
+          {' '}unpriced
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--cyan)' }} />
-          {cov.time_valid}/{threadRows} timed thread rows
+          <span className="coverage-nums">{cov.time_valid}/{threadRows}</span>
+          {' '}timed thread rows
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--orange)' }} />
-          {rootSessions} root sessions
+          <span className="coverage-nums coverage-nums-single">{rootSessions}</span>
+          {' '}root sessions
         </span>
       </div>
     </div>

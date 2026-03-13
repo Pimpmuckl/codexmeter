@@ -12,6 +12,7 @@ export async function enrichFromRollout(rolloutPath) {
     first_timestamp: null,
     last_timestamp: null,
     parent_thread_id: null,
+    usage_total: null,
   };
 
   try {
@@ -37,6 +38,19 @@ export async function enrichFromRollout(rolloutPath) {
             if (!result.last_timestamp || ts > result.last_timestamp) {
               result.last_timestamp = ts;
             }
+          }
+        }
+
+        if (obj.type === 'event_msg' && obj.payload?.type === 'token_count') {
+          const usage = obj.payload.info?.total_token_usage;
+          if (usage) {
+            result.usage_total = {
+              input_tokens: usage.input_tokens || 0,
+              cached_input_tokens: usage.cached_input_tokens || 0,
+              output_tokens: usage.output_tokens || 0,
+              reasoning_output_tokens: usage.reasoning_output_tokens || 0,
+              total_tokens: usage.total_tokens || 0,
+            };
           }
         }
 
