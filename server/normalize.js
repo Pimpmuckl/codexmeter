@@ -1,6 +1,6 @@
 const AGENT_FAMILY_MAP = {
   review_plan: 'planning',
-  review_github: 'github_review',
+  review_github: 'review',
   'memory builder': 'memory',
 };
 
@@ -8,7 +8,7 @@ const AGENT_FAMILY_PREFIX_RULES = [
   { prefix: 'review_benchmark_', family: 'review' },
   { prefix: 'review_', family: 'review' },
   { prefix: 'review', family: 'review' },
-  { prefix: 'worker', family: 'implementation' },
+  { prefix: 'worker', family: 'generic' },
   { prefix: 'explorer', family: 'exploration' },
   { prefix: 'local_explorer', family: 'exploration' },
   { prefix: 'web_explorer', family: 'exploration' },

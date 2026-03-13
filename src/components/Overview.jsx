@@ -69,10 +69,11 @@ function Heatmap({ heatmapData }) {
   function intensity(v) {
     if (v === 0) return 'var(--bg-elevated)';
     const t = Math.min(v / maxVal, 1);
-    if (t < 0.25) return 'rgba(99, 102, 241, 0.2)';
-    if (t < 0.5) return 'rgba(99, 102, 241, 0.4)';
-    if (t < 0.75) return 'rgba(99, 102, 241, 0.65)';
-    return 'rgba(99, 102, 241, 0.9)';
+    if (t < 0.15) return 'rgba(99, 102, 241, 0.4)';
+    if (t < 0.4) return 'rgba(99, 102, 241, 0.6)';
+    if (t < 0.7) return 'rgba(99, 102, 241, 0.85)';
+    if (t < 1) return 'rgba(99, 102, 241, 0.95)';
+    return '#fff';
   }
 
   const firstDay = cells[0]?.date.getDay() || 0;
@@ -109,7 +110,7 @@ function Heatmap({ heatmapData }) {
   );
 }
 
-export default function Overview({ data, heatmap, families, repos }) {
+export default function Overview({ data, heatmap, families, repos, models }) {
   const [range, setRange] = useState('d30');
 
   const ov = data?.data;
@@ -122,6 +123,7 @@ export default function Overview({ data, heatmap, families, repos }) {
 
   const topRepos = repos?.data?.slice(0, 6) || [];
   const topFamilies = families?.data || [];
+  const topModels = models?.data?.slice(0, 6) || [];
 
   const repoOption = {
     backgroundColor: 'transparent',
@@ -161,6 +163,27 @@ export default function Overview({ data, heatmap, families, repos }) {
         name: f.family,
         value: f.tokens,
         itemStyle: { color: getFamilyColor(f.family) },
+      })),
+    }],
+  };
+
+  const modelOption = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'item',
+      formatter: p => `${p.name}: ${fmt(p.value)} tokens (${p.percent}%)`,
+    },
+    series: [{
+      type: 'pie',
+      radius: ['48%', '72%'],
+      center: ['50%', '50%'],
+      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
+      labelLine: { lineStyle: { color: '#30363d' } },
+      itemStyle: { borderColor: '#161b22', borderWidth: 2 },
+      data: topModels.map(m => ({
+        name: m.model_name,
+        value: m.tokens,
+        itemStyle: { color: getModelColor(m.model_name) },
       })),
     }],
   };
@@ -214,7 +237,7 @@ export default function Overview({ data, heatmap, families, repos }) {
 
       <Heatmap heatmapData={heatmap} />
 
-      <div className="grid-2">
+      <div className="grid-3">
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Top Repos</div>
           {topRepos.length > 0 ? (
@@ -224,9 +247,17 @@ export default function Overview({ data, heatmap, families, repos }) {
           )}
         </div>
         <div className="chart-card">
-          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Agent Families</div>
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
             <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" />
+          ) : (
+            <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
+          )}
+        </div>
+        <div className="chart-card">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models</div>
+          {topModels.length > 0 ? (
+            <ReactEChartsCore echarts={echarts} option={modelOption} style={{ height: 180 }} theme="dark" />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}

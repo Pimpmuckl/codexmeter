@@ -21,7 +21,7 @@ function fmtCost(n) {
   return '$' + n.toFixed(2);
 }
 
-const FAMILY_FILTERS = ['all', 'implementation', 'review', 'exploration', 'planning', 'memory', 'generic'];
+const FAMILY_FILTERS = ['all', 'review', 'exploration', 'planning', 'memory', 'generic'];
 
 function exportChart(ref) {
   if (!ref.current) return;

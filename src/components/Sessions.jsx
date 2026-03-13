@@ -17,7 +17,7 @@ function fmtDur(s) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60
 function fmtTime(ts) { return !ts ? '—' : new Date(ts * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
 
 const ch = createColumnHelper();
-const FAMILY_TAG = { review: 'tag-review', implementation: 'tag-implementation', exploration: 'tag-exploration', planning: 'tag-planning', github_review: 'tag-github_review', memory: 'tag-memory', generic: 'tag-generic' };
+const FAMILY_TAG = { review: 'tag-review', exploration: 'tag-exploration', planning: 'tag-planning', memory: 'tag-memory', generic: 'tag-generic' };
 
 export default function Sessions({ data }) {
   const [search, setSearch] = useState('');

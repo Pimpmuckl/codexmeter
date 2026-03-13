@@ -108,7 +108,7 @@ export default function App() {
       </nav>
 
       <div className="main-content">
-        {tab === 'Overview' && <Overview data={data.overview} heatmap={data.heatmap} families={data.families} repos={data.repos} />}
+        {tab === 'Overview' && <Overview data={data.overview} heatmap={data.heatmap} families={data.families} repos={data.repos} models={data.models} />}
         {tab === 'Repos' && <Repos data={data.repos} />}
         {tab === 'Models' && <Models data={data.models} />}
         {tab === 'Daily' && <DailyUsage data={data.daily} />}
