@@ -5,6 +5,7 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor, getEffortColor } from '../utils/colors';
+import { buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
@@ -31,7 +32,7 @@ function sortEffortEntries(entries) {
   });
 }
 
-function ModelDetailCharts({ model, fmt }) {
+function ModelDetailCharts({ model, fmt, chartMode }) {
   const [showDetails, setShowDetails] = useState(false);
   const effortData = useMemo(() => sortEffortEntries(Object.entries(model.by_effort || {})), [model.by_effort]);
   if (!effortData.length) return null;
@@ -46,75 +47,45 @@ function ModelDetailCharts({ model, fmt }) {
     fallbackPriced: v.heuristic_priced || 0,
   }));
 
-  const runsOption = {
-    backgroundColor: 'transparent',
-    title: { text: 'Sessions by effort', left: 'center', top: 8, textStyle: { fontSize: 11, color: '#8b949e', fontWeight: 'normal' } },
-    tooltip: { trigger: 'item', formatter: p => `${p.name}: ${p.value} sessions (${p.percent}%)`, confine: false, appendToBody: true },
-    series: [{
-      type: 'pie',
-      radius: ['48%', '72%'],
-      center: ['50%', '55%'],
-      color: effortData.map(([e]) => getEffortColor(e)),
-      label: { show: true, color: '#8b949e', fontSize: 10, formatter: '{b}' },
-      labelLine: { lineStyle: { color: '#30363d' } },
-      itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: effortData.map(([effort, v]) => ({
-        name: effort,
-        value: v.sessions,
-        itemStyle: { color: getEffortColor(effort) },
-      })),
-    }],
-  };
+  const breakdownRows = summaryRows.map((row) => ({
+    key: row.effort,
+    sessions: row.sessions,
+    tokens: row.tokens,
+    avgTokens: row.avgTokens,
+  }));
 
-  const tokensOption = {
-    backgroundColor: 'transparent',
-    title: { text: 'Tokens by effort', left: 'center', top: 8, textStyle: { fontSize: 11, color: '#8b949e', fontWeight: 'normal' } },
-    tooltip: { trigger: 'item', formatter: p => `${p.name}: ${fmt(p.value)} tokens (${p.percent}%)`, confine: false, appendToBody: true },
-    series: [{
-      type: 'pie',
-      radius: ['48%', '72%'],
-      center: ['50%', '55%'],
-      color: effortData.map(([e]) => getEffortColor(e)),
-      label: { show: true, color: '#8b949e', fontSize: 10, formatter: '{b}' },
-      labelLine: { lineStyle: { color: '#30363d' } },
-      itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: effortData.map(([effort, v]) => ({
-        name: effort,
-        value: v.tokens,
-        itemStyle: { color: getEffortColor(effort) },
-      })),
-    }],
-  };
+  const runsOption = buildDistributionOption({
+    title: 'Sessions by effort',
+    rows: breakdownRows,
+    valueKey: 'sessions',
+    colorForKey: getEffortColor,
+    valueFormatter: (value) => Math.round(value).toLocaleString(),
+    chartMode,
+    defaultMode: 'donut',
+  });
 
-  const perRunReversed = [...effortData].reverse();
-  const perRunOption = {
-    backgroundColor: 'transparent',
-    title: { text: 'Avg tokens per session', left: 'center', top: 8, textStyle: { fontSize: 11, color: '#8b949e', fontWeight: 'normal' } },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: params => {
-      const idx = params[0]?.dataIndex;
-      const [effort, v] = perRunReversed[idx] || [];
-      const avg = v?.sessions ? Math.round(v.tokens / v.sessions) : 0;
-      return `${effort}: ${fmt(avg)} tokens/session (${v?.sessions} sessions)`;
-    }},
-    grid: { left: 55, right: 45, top: 35, bottom: 20 },
-    xAxis: { type: 'value', axisLabel: { formatter: v => fmt(v), color: '#484f58', fontSize: 10 }, splitLine: { lineStyle: { color: '#21262d' } } },
-    yAxis: { type: 'category', data: perRunReversed.map(([e]) => e), axisLabel: { color: '#8b949e', fontSize: 10 }, axisTick: { show: false }, axisLine: { show: false } },
-    series: [{
-      type: 'bar',
-      data: perRunReversed.map(([effort, v]) => ({
-        value: v.sessions ? Math.round(v.tokens / v.sessions) : 0,
-        itemStyle: { color: getEffortColor(effort), borderRadius: [0, 3, 3, 0] },
-      })),
-      barMaxWidth: 14,
-      label: { show: true, position: 'right', formatter: p => fmt(p.value), color: '#8b949e', fontSize: 9 },
-    }],
-  };
+  const tokensOption = buildDistributionOption({
+    title: 'Tokens by effort',
+    rows: breakdownRows,
+    valueKey: 'tokens',
+    colorForKey: getEffortColor,
+    valueFormatter: fmt,
+    chartMode,
+    defaultMode: 'donut',
+  });
+
+  const perRunOption = buildDistributionOption({
+    title: 'Avg tokens per session',
+    rows: breakdownRows,
+    valueKey: 'avgTokens',
+    colorForKey: getEffortColor,
+    valueFormatter: fmt,
+    chartMode,
+    defaultMode: 'bar',
+  });
 
   return (
     <div className="model-detail-wrap">
-      <div className="model-detail-note">
-        Model drill-in is grouped by reasoning effort. The bar chart is an average, not a literal per-session timeline.
-      </div>
       <div className="model-detail-charts">
         <div className="model-detail-donut">
           <ReactEChartsCore echarts={echarts} option={runsOption} style={{ width: '100%', height: '100%' }} theme="dark" />
@@ -167,14 +138,19 @@ function exportChart(ref) {
   Object.assign(document.createElement('a'), { href: url, download: 'codexmeter-models.png' }).click();
 }
 
-export default function Models({ data }) {
+function getModelsData(data) {
+  const d = data?.data;
+  return Array.isArray(d) ? d : d?.total || [];
+}
+
+export default function Models({ data, chartMode = 'default' }) {
   const [expanded, setExpanded] = useState(null);
   const chartRef = useRef(null);
 
-  if (!data?.data?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
-
-  const models = data.data;
+  const models = getModelsData(data);
+  if (!models?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
   const reversed = [...models].reverse();
+  const maxTokens = Math.max(...models.map((model) => model.tokens || 0), 0);
 
   const option = {
     backgroundColor: 'transparent',
@@ -183,7 +159,17 @@ export default function Models({ data }) {
       return `<b>${m.model_name}</b><br/>Tokens: ${fmt(m.tokens)}<br/>Cost: ${fmtCost(m.cost)}<br/>Sessions: ${m.sessions}`;
     }},
     grid: { left: 160, right: 50, top: 8, bottom: 8 },
-    xAxis: { type: 'value', axisLabel: { formatter: v => fmt(v), color: '#484f58', fontSize: 10 }, splitLine: { lineStyle: { color: '#21262d' } } },
+    xAxis: {
+      type: 'value',
+      splitNumber: 4,
+      max: maxTokens || 1,
+      axisLabel: { formatter: v => fmt(v), color: '#484f58', fontSize: 10, showMinLabel: true, showMaxLabel: true },
+      splitLine: {
+        lineStyle: {
+          color: ['transparent', '#21262d', '#21262d', '#21262d', 'transparent'],
+        },
+      },
+    },
     yAxis: { type: 'category', data: reversed.map(m => m.model_name), axisLabel: { color: '#8b949e', fontSize: 11 }, axisTick: { show: false }, axisLine: { show: false } },
     series: [{
       type: 'bar',
@@ -239,7 +225,7 @@ export default function Models({ data }) {
                 </tr>
                 {expanded === m.model_name && (
                   <tr><td colSpan={5} style={{ background: 'var(--bg-surface)', padding: '0.75rem 1rem' }}>
-                    <ModelDetailCharts model={m} fmt={fmt} />
+                    <ModelDetailCharts model={m} fmt={fmt} chartMode={chartMode} />
                   </td></tr>
                 )}
               </React.Fragment>

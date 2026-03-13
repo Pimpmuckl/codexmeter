@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
+import { useCountUp } from '../hooks/useCountUp';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
@@ -25,6 +26,27 @@ function fmtCost(n) {
 function fmtHours(sec) {
   if (!sec) return '0h';
   return (sec / 3600).toFixed(1) + 'h';
+}
+
+function wrapRepoLabel(label, maxLineLength = 16) {
+  if (!label) return '';
+  const parts = String(label).split(/([-/])/).filter(Boolean);
+  const lines = [''];
+
+  for (const part of parts) {
+    const current = lines[lines.length - 1];
+    if (!current.length || (current + part).length <= maxLineLength) {
+      lines[lines.length - 1] = current + part;
+      continue;
+    }
+    if (lines.length === 2) {
+      lines[1] += part;
+      break;
+    }
+    lines.push(part);
+  }
+
+  return lines.join('\n');
 }
 
 const HEATMAP_METRICS = [
@@ -83,7 +105,7 @@ function Heatmap({ heatmapData }) {
           c ? (
             <div
               key={c.key}
-              className="heatmap-cell"
+              className={`heatmap-cell ${c.val > 0 ? 'active' : ''}`}
               style={{ background: intensity(c.val) }}
               title={`${c.key}: ${HEATMAP_METRICS.find(m => m.key === metric).fmt(c.val)}`}
             />
@@ -97,12 +119,11 @@ function Heatmap({ heatmapData }) {
   );
 }
 
-export default function Overview({ data, heatmap, families, repos, models, range = 'd30' }) {
+const COUNT_DURATION = 180;
 
+export default function Overview({ data, heatmap, families, repos, models, range = 'total' }) {
   const ov = data?.data;
-  if (!ov) return null;
-
-  const d = ov[range] || ov.total || {};
+  const d = ov?.[range] || ov?.total || {};
   const cov = d.coverage || {};
   const threadRows = cov.thread_rows ?? cov.total ?? 0;
   const rootSessions = cov.root_sessions ?? d.total_sessions ?? 0;
@@ -113,9 +134,26 @@ export default function Overview({ data, heatmap, families, repos, models, range
   const fallbackPriced = cov.priced_fallback ?? 0;
   const unpriced = cov.unpriced ?? Math.max(threadRows - (cov.priced ?? 0), 0);
 
-  const topRepos = repos?.data?.slice(0, 6) || [];
-  const topFamilies = families?.data || [];
-  const topModels = models?.data?.slice(0, 6) || [];
+  const tokens = useCountUp(d.total_tokens ?? 0, COUNT_DURATION);
+  const elapsed = useCountUp(d.total_elapsed_seconds ?? 0, COUNT_DURATION);
+  const cost = useCountUp(d.total_cost ?? 0, COUNT_DURATION);
+  const sessions = useCountUp(rootSessions, COUNT_DURATION);
+  const enriched = useCountUp(cov.enriched ?? 0, COUNT_DURATION);
+  const priced = useCountUp(cov.priced ?? 0, COUNT_DURATION);
+  const exactPricedAnim = useCountUp(exactPriced, COUNT_DURATION);
+  const fallbackPricedAnim = useCountUp(fallbackPriced, COUNT_DURATION);
+  const unpricedAnim = useCountUp(unpriced, COUNT_DURATION);
+  const timeValid = useCountUp(cov.time_valid ?? 0, COUNT_DURATION);
+
+  const reposForRange = Array.isArray(repos?.data) ? repos.data : repos?.data?.[range] || repos?.data?.total || [];
+  const familiesForRange = Array.isArray(families?.data) ? families.data : families?.data?.[range] || families?.data?.total || [];
+  const modelsForRange = Array.isArray(models?.data) ? models.data : models?.data?.[range] || models?.data?.total || [];
+
+  const topRepos = reposForRange.slice(0, 6);
+  const topFamilies = familiesForRange;
+  const topModels = modelsForRange.slice(0, 6);
+
+  if (!ov) return null;
 
   const repoOption = {
     backgroundColor: 'transparent',
@@ -129,7 +167,11 @@ export default function Overview({ data, heatmap, families, repos, models, range
     yAxis: {
       type: 'category',
       data: [...topRepos].reverse().map(r => r.repo_label),
-      axisLabel: { color: '#8b949e', fontSize: 11 },
+      axisLabel: {
+        color: '#8b949e',
+        fontSize: 11,
+        formatter: (value) => wrapRepoLabel(value),
+      },
       axisTick: { show: false }, axisLine: { show: false },
     },
     series: [{
@@ -189,23 +231,23 @@ export default function Overview({ data, heatmap, families, repos, models, range
       <div className="stat-row">
         <div className="stat-card">
           <div className="stat-label">Tokens</div>
-          <div className="stat-value">{fmt(d.total_tokens)}</div>
-          <div className="stat-per-day"><span className="stat-per-day-value">{fmt((d.total_tokens || 0) / days)}</span> per day</div>
+          <div className="stat-value">{fmt(tokens)}</div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{fmt(tokens / days)}</span> per day</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Agent Time</div>
-          <div className="stat-value">{fmtHours(d.total_elapsed_seconds)}</div>
-          <div className="stat-per-day"><span className="stat-per-day-value">{fmtHours((d.total_elapsed_seconds || 0) / days)}</span> per day</div>
+          <div className="stat-value">{fmtHours(elapsed)}</div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{fmtHours(elapsed / days)}</span> per day</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Est. API Cost</div>
-          <div className="stat-value">{fmtCost(d.total_cost)}</div>
-          <div className="stat-per-day"><span className="stat-per-day-value">{fmtCost((d.total_cost || 0) / days)}</span> per day</div>
+          <div className="stat-value">{fmtCost(cost)}</div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{fmtCost(cost / days)}</span> per day</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Sessions</div>
-          <div className="stat-value">{rootSessions.toLocaleString()}</div>
-          <div className="stat-per-day"><span className="stat-per-day-value">{(rootSessions / days).toFixed(1)}</span> per day</div>
+          <div className="stat-value">{Math.round(sessions).toLocaleString()}</div>
+          <div className="stat-per-day"><span className="stat-per-day-value">{(sessions / days).toFixed(1)}</span> per day</div>
         </div>
       </div>
 
@@ -242,37 +284,37 @@ export default function Overview({ data, heatmap, families, repos, models, range
         <span style={{ fontWeight: 500 }}>Coverage:</span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--accent)' }} />
-          <span className="coverage-nums">{cov.enriched}/{threadRows}</span>
+          <span className="coverage-nums">{Math.round(enriched)}/{threadRows}</span>
           {' '}enriched thread rows
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--green)' }} />
-          <span className="coverage-nums">{cov.priced}/{threadRows}</span>
+          <span className="coverage-nums">{Math.round(priced)}/{threadRows}</span>
           {' '}priced thread rows
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: '#22c55e' }} />
-          <span className="coverage-nums">{exactPriced}</span>
+          <span className="coverage-nums">{Math.round(exactPricedAnim)}</span>
           {' '}exact-priced
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: '#c084fc' }} />
-          <span className="coverage-nums">{fallbackPriced}</span>
+          <span className="coverage-nums">{Math.round(fallbackPricedAnim)}</span>
           {' '}fallback-priced
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: '#64748b' }} />
-          <span className="coverage-nums">{unpriced}</span>
+          <span className="coverage-nums">{Math.round(unpricedAnim)}</span>
           {' '}unpriced
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--cyan)' }} />
-          <span className="coverage-nums">{cov.time_valid}/{threadRows}</span>
+          <span className="coverage-nums">{Math.round(timeValid)}/{threadRows}</span>
           {' '}timed thread rows
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: 'var(--orange)' }} />
-          <span className="coverage-nums coverage-nums-single">{rootSessions}</span>
+          <span className="coverage-nums coverage-nums-single">{Math.round(sessions)}</span>
           {' '}root sessions
         </span>
       </div>

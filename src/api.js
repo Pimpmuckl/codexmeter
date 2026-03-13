@@ -1,5 +1,7 @@
+const API_BASE = (import.meta.env.VITE_CODEXMETER_API_URL || '').replace(/\/$/, '');
+
 async function fetchJson(endpoint) {
-  const res = await fetch(endpoint);
+  const res = await fetch(`${API_BASE}${endpoint}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

@@ -6,6 +6,7 @@ import {
 } from './normalize.js';
 import { initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
+import { createDayKeyFormatter } from './day-key.js';
 
 export function createIngestState() {
   return {
@@ -26,6 +27,7 @@ export function createIngestState() {
 
 export async function runIngest(codexHome, state, opts = {}) {
   const tz = opts.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const toDayKey = createDayKeyFormatter(tz);
 
   try {
     state.phase = 'inventory';
@@ -61,6 +63,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         model_name: null,
         reasoning_effort: null,
         usage_total: null,
+        active_by_day: null,
         agent_role: t.agent_role,
         agent_nickname: t.agent_nickname,
         agent_family: classifyAgentFamily(t.agent_role),
@@ -68,6 +71,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         parent_thread_id: null,
         cost: null,
         cost_source: 'unavailable',
+        materialized: !t.rollout_path,
         title: t.title,
         cli_version: t.cli_version,
       });
@@ -77,11 +81,13 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     const candidates = sessions
       .filter(s => s.rollout_path)
-      .sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+      .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
 
     state.needs_enrichment = candidates.length;
     state.percent = candidates.length > 0 ? 0 : 0.90;
     const BATCH_SIZE = 25;
+    const PARTIAL_REBUILD_EVERY = opts.partialRebuildEvery || 250;
+    let lastPartialRebuildCount = 0;
 
     for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
       const batch = candidates.slice(i, i + BATCH_SIZE);
@@ -92,7 +98,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       }
 
       const results = await Promise.all(
-        batch.map(s => enrichFromRollout(s.rollout_path).catch(() => null))
+        batch.map(s => enrichFromRollout(s.rollout_path, { timezone: tz, toDayKey }).catch(() => null))
       );
 
       for (let j = 0; j < batch.length; j++) {
@@ -103,14 +109,12 @@ export async function runIngest(codexHome, state, opts = {}) {
           if (data.reasoning_effort) s.reasoning_effort = data.reasoning_effort;
           if (data.parent_thread_id) s.parent_thread_id = data.parent_thread_id;
           if (data.usage_total) s.usage_total = data.usage_total;
-
-          if (data.first_timestamp && data.last_timestamp) {
-            const rolloutDuration = (data.last_timestamp - data.first_timestamp) / 1000;
-            if (rolloutDuration > 0 && rolloutDuration < 86400 * 7) {
-              s.elapsed_seconds = Math.round(rolloutDuration);
-            }
+          if (data.active_seconds && data.active_seconds > 0) {
+            s.elapsed_seconds = data.active_seconds;
+            s.active_by_day = data.active_by_day || null;
           }
         }
+        s.materialized = true;
       }
 
       state.enriched = Math.min(i + BATCH_SIZE, candidates.length);
@@ -118,17 +122,27 @@ export async function runIngest(codexHome, state, opts = {}) {
         ? (state.enriched / candidates.length) * 0.90
         : 0.90;
 
-      if (state.enriched % 200 < BATCH_SIZE) {
+      const shouldRebuildPartial =
+        state.enriched === batch.length ||
+        state.enriched === candidates.length ||
+        (state.enriched - lastPartialRebuildCount) >= PARTIAL_REBUILD_EVERY;
+
+      if (shouldRebuildPartial) {
         assignRootThreadIds(sessions);
-        rebuildAggregates(sessions, state, opts, tz);
+        rebuildAggregates(sessions, state, opts, tz, { partial: true });
+        lastPartialRebuildCount = state.enriched;
       }
     }
 
     for (const s of sessions) {
       if (s.elapsed_seconds === null) {
         const fallback = (s.ended_at || 0) - (s.started_at || 0);
-        if (fallback > 0 && fallback < 86400) {
+        if (fallback > 0 && fallback < 3600) {
           s.elapsed_seconds = fallback;
+          if (s.started_at) {
+            const dayKey = toDayKey(s.started_at * 1000);
+            s.active_by_day = { [dayKey]: fallback };
+          }
         }
       }
       const priced = priceSession(s.model_name, {
@@ -157,10 +171,12 @@ export async function runIngest(codexHome, state, opts = {}) {
   }
 }
 
-function rebuildAggregates(sessions, state, opts, tz) {
-  const filtered = applyFilters(sessions, opts);
-  state.sessions = buildSessionView(filtered, sessions);
-  state.aggregates = buildAggregates(filtered, tz);
+function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
+  const source = mode.partial ? sessions.filter(session => session.materialized) : sessions;
+  const filtered = applyFilters(source, opts);
+  const sessionView = buildSessionView(filtered, source);
+  state.sessions = sessionView;
+  state.aggregates = buildAggregates(filtered, tz, sessionView);
   state.generated_at = new Date().toISOString();
 }
 

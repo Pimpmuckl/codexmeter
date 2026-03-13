@@ -24,7 +24,7 @@ export function readThreads(codexHome, onProgress) {
         tokens_used, agent_nickname, agent_role,
         cli_version, git_branch, git_origin_url
       FROM threads
-      ORDER BY created_at DESC
+      ORDER BY created_at ASC
     `);
 
     const threads = [];

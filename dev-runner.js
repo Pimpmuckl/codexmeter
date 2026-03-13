@@ -43,13 +43,13 @@ const frontend = spawn(
     '--host', HOST,
     '--port', String(webPort),
     '--strictPort',
-    '--open',
   ],
   {
     stdio: 'inherit',
     env: {
       ...process.env,
       CODEXMETER_API_URL: apiUrl,
+      VITE_CODEXMETER_API_URL: apiUrl,
     },
   }
 );

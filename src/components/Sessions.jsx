@@ -66,7 +66,23 @@ export default function Sessions({ data }) {
 
   const table = useReactTable({ data: rows, columns, state: { sorting }, onSortingChange: setSorting, getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel() });
   const tableRows = table.getRowModel().rows;
-  const virt = useVirtualizer({ count: tableRows.length, getScrollElement: () => parentRef.current, estimateSize: () => 36, overscan: 20 });
+  const filteredTotals = useMemo(() => rows.reduce((acc, row) => {
+    acc.sessions += 1;
+    acc.tokens += row.tokens_used || 0;
+    acc.cost += row.cost || 0;
+    acc.elapsed += row.elapsed_seconds || 0;
+    return acc;
+  }, { sessions: 0, tokens: 0, cost: 0, elapsed: 0 }), [rows]);
+  const virt = useVirtualizer({
+    count: tableRows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 36,
+    overscan: 10,
+    getItemKey: (index) => tableRows[index]?.id ?? index,
+  });
+  const virtualItems = virt.getVirtualItems();
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom = virtualItems.length > 0 ? virt.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
 
   return (
     <div className="animate-in">
@@ -77,6 +93,12 @@ export default function Sessions({ data }) {
         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.4rem 1rem', borderBottom: '1px solid var(--border)' }}>
           {rows.length.toLocaleString()} root sessions
           {data && !data.complete && <span className="incomplete-badge" style={{ marginLeft: '0.5rem' }}>partial</span>}
+        </div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.45rem 1rem', borderBottom: '1px solid var(--border)', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+          <span>Filtered sessions: <strong style={{ color: 'var(--text-secondary)' }}>{filteredTotals.sessions.toLocaleString()}</strong></span>
+          <span>Tokens: <strong style={{ color: 'var(--text-secondary)' }}>{fmt(filteredTotals.tokens)}</strong></span>
+          <span>Cost: <strong style={{ color: 'var(--text-secondary)' }}>{fmtCost(filteredTotals.cost)}</strong></span>
+          <span>Time: <strong style={{ color: 'var(--text-secondary)' }}>{fmtDur(filteredTotals.elapsed)}</strong></span>
         </div>
         <div ref={parentRef} style={{ height: '600px', overflow: 'auto' }}>
           <table style={{ tableLayout: 'fixed', width: '100%' }}>
@@ -91,11 +113,13 @@ export default function Sessions({ data }) {
               ))}
             </thead>
             <tbody>
-              {virt.getVirtualItems().length === 0 && <tr><td colSpan={columns.length} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No sessions</td></tr>}
-              {virt.getVirtualItems().map(vi => {
+              {virtualItems.length === 0 && <tr><td colSpan={columns.length} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No sessions</td></tr>}
+              {paddingTop > 0 && <tr><td colSpan={columns.length} style={{ height: `${paddingTop}px`, padding: 0, borderBottom: 'none' }} /></tr>}
+              {virtualItems.map(vi => {
                 const row = tableRows[vi.index];
                 return <tr key={row.id} style={{ height: vi.size }}>{row.getVisibleCells().map(c => <td key={c.id} style={{ width: c.column.getSize() }}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>)}</tr>;
               })}
+              {paddingBottom > 0 && <tr><td colSpan={columns.length} style={{ height: `${paddingBottom}px`, padding: 0, borderBottom: 'none' }} /></tr>}
             </tbody>
           </table>
         </div>

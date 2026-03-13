@@ -26,16 +26,24 @@ export function normalizeCwd(cwd) {
 }
 
 export function deriveRepoKey(normalizedCwd) {
-  return normalizedCwd || 'unknown';
+  const label = deriveRepoLabel(normalizedCwd);
+  return label === 'unknown' ? 'unknown' : `repo:${label}`;
 }
 
 export function deriveRepoLabel(normalizedCwd) {
   if (!normalizedCwd) return 'unknown';
   const worktreeMatch = normalizedCwd.match(/\.codex\/worktrees\/[^/]+\/([^/]+)/);
-  if (worktreeMatch) return worktreeMatch[1];
+  if (worktreeMatch) return collapseWorktreeLabel(worktreeMatch[1]);
   if (normalizedCwd.includes('.codex')) return '.codex';
   const segments = normalizedCwd.split('/').filter(Boolean);
-  return segments[segments.length - 1] || 'unknown';
+  return collapseWorktreeLabel(segments[segments.length - 1] || 'unknown');
+}
+
+function collapseWorktreeLabel(label) {
+  return String(label || '')
+    .replace(/-wt-[a-z0-9._-]+$/i, '')
+    .replace(/-worktree-[a-z0-9._-]+$/i, '')
+    .replace(/-worktrees?-[a-z0-9._-]+$/i, '') || 'unknown';
 }
 
 export function classifyAgentFamily(agentRole) {

@@ -1,16 +1,23 @@
 import { createReadStream, existsSync } from 'fs';
 import { createInterface } from 'readline';
+import { createDayKeyFormatter } from './day-key.js';
 
-export async function enrichFromRollout(rolloutPath) {
+const ACTIVE_GAP_CAP_MS = 15 * 60 * 1000;
+
+export async function enrichFromRollout(rolloutPath, opts = {}) {
   if (!rolloutPath || !existsSync(rolloutPath)) {
     return null;
   }
 
+  const tz = opts.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const toDayKey = opts.toDayKey || createDayKeyFormatter(tz);
   const result = {
     model_name: null,
     reasoning_effort: null,
     first_timestamp: null,
     last_timestamp: null,
+    active_seconds: null,
+    active_by_day: null,
     parent_thread_id: null,
     usage_total: null,
   };
@@ -21,9 +28,10 @@ export async function enrichFromRollout(rolloutPath) {
       crlfDelay: Infinity,
     });
 
-    let linesRead = 0;
+    let prevTimestamp = null;
+    let activeMs = 0;
+    const activeByDay = new Map();
     for await (const line of rl) {
-      linesRead++;
       if (!line.trim()) continue;
 
       try {
@@ -38,6 +46,15 @@ export async function enrichFromRollout(rolloutPath) {
             if (!result.last_timestamp || ts > result.last_timestamp) {
               result.last_timestamp = ts;
             }
+            if (prevTimestamp !== null && ts >= prevTimestamp) {
+              const deltaMs = Math.min(ts - prevTimestamp, ACTIVE_GAP_CAP_MS);
+              activeMs += deltaMs;
+              if (deltaMs > 0) {
+                const dayKey = toDayKey(prevTimestamp);
+                activeByDay.set(dayKey, (activeByDay.get(dayKey) || 0) + deltaMs);
+              }
+            }
+            prevTimestamp = ts;
           }
         }
 
@@ -78,6 +95,13 @@ export async function enrichFromRollout(rolloutPath) {
         // malformed line
       }
 
+    }
+    if (activeMs > 0) {
+      const activeByDaySeconds = Object.fromEntries(
+        [...activeByDay.entries()].map(([dayKey, ms]) => [dayKey, Math.round(ms / 1000)])
+      );
+      result.active_by_day = activeByDaySeconds;
+      result.active_seconds = Object.values(activeByDaySeconds).reduce((sum, seconds) => sum + seconds, 0);
     }
   } catch {
     return null;

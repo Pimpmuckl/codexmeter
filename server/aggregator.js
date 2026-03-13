@@ -1,4 +1,5 @@
 import { CACHE_ASSUMPTIONS } from './cost-catalog.js';
+import { createDayKeyFormatter } from './day-key.js';
 
 function normalizeEffortKey(effort) {
   if (!effort) return 'unknown';
@@ -10,18 +11,36 @@ function normalizeEffortKey(effort) {
   return k || 'unknown';
 }
 
-export function buildAggregates(sessions, tz) {
+export function buildAggregates(sessions, tz, sessionView = null) {
   const now = Date.now() / 1000;
   const d7 = now - 7 * 86400;
   const d30 = now - 30 * 86400;
-  const sessionView = buildSessionView(sessions);
+  const groupedSessions = sessionView || buildSessionView(sessions);
 
-  const overview = buildOverview(sessions, sessionView, d7, d30);
-  const repos = buildRepos(sessions);
-  const models = buildModels(sessions);
-  const daily = buildDaily(sessions, tz);
-  const heatmap = buildHeatmap(sessions, tz);
-  const families = buildFamilies(sessions);
+  const rawBuckets = { total: sessions, d7: [], d30: [] };
+  for (const s of sessions) {
+    if (overlapsLowerBound(s, d7)) rawBuckets.d7.push(s);
+    if (overlapsLowerBound(s, d30)) rawBuckets.d30.push(s);
+  }
+
+  const overview = buildOverview(sessions, groupedSessions, d7, d30);
+  const repos = {
+    total: buildRepos(rawBuckets.total),
+    d7: buildRepos(rawBuckets.d7),
+    d30: buildRepos(rawBuckets.d30),
+  };
+  const models = {
+    total: buildModels(rawBuckets.total),
+    d7: buildModels(rawBuckets.d7),
+    d30: buildModels(rawBuckets.d30),
+  };
+  const families = {
+    total: buildFamilies(rawBuckets.total),
+    d7: buildFamilies(rawBuckets.d7),
+    d30: buildFamilies(rawBuckets.d30),
+  };
+  const daily = buildDaily(sessions, groupedSessions, tz);
+  const heatmap = buildHeatmap(sessions, groupedSessions, tz);
 
   return { overview, repos, models, daily, heatmap, families };
 }
@@ -69,11 +88,17 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
       } else {
         unpriced++;
       }
-      if (s.elapsed_seconds != null && s.elapsed_seconds > 0) { timeValid++; elapsed += s.elapsed_seconds; }
+      if (s.elapsed_seconds != null && s.elapsed_seconds > 0) { timeValid++; }
       if (s.model_name) { enriched++; modelSet.add(s.model_name); }
       repoSet.add(s.repo_label);
       if (s.started_at < earliest) earliest = s.started_at;
       if (s.ended_at > latest) latest = s.ended_at;
+    }
+
+    for (const s of groupedArr) {
+      if (s.elapsed_seconds != null && s.elapsed_seconds > 0) {
+        elapsed += s.elapsed_seconds;
+      }
     }
 
     return {
@@ -201,20 +226,19 @@ function buildFamilies(sessions) {
   return [...map.values()].sort((a, b) => b.tokens - a.tokens);
 }
 
-function buildDaily(sessions, tz) {
+function buildDaily(rawSessions, groupedSessions, tz) {
+  const toDayKeyInTz = createDayKeyFormatter(tz);
   const dayMap = new Map();
-  for (const s of sessions) {
+  for (const s of rawSessions) {
     if (!s.started_at || !s.ended_at) continue;
-    const elapsed = s.elapsed_seconds;
-    if (!elapsed || elapsed <= 0) continue;
 
     const startMs = s.started_at * 1000;
     const endMs = s.ended_at * 1000;
     const totalDur = endMs - startMs;
     if (totalDur <= 0) continue;
 
-    const startDay = toDayKey(startMs, tz);
-    const endDay = toDayKey(endMs - 1, tz);
+    const startDay = toDayKeyInTz(startMs);
+    const endDay = toDayKeyInTz(endMs - 1);
 
     if (startDay === endDay) {
       addToDay(dayMap, startDay, s, 1.0);
@@ -225,9 +249,17 @@ function buildDaily(sessions, tz) {
         const overlapStart = Math.max(cursor, startMs);
         const overlapEnd = Math.min(nextDay, endMs);
         const fraction = (overlapEnd - overlapStart) / totalDur;
-        if (fraction > 0) addToDay(dayMap, toDayKey(cursor, tz), s, fraction);
+        if (fraction > 0) addToDay(dayMap, toDayKeyInTz(cursor), s, fraction);
         cursor = nextDay;
       }
+    }
+  }
+
+  for (const s of groupedSessions) {
+    if (!s.active_by_day) continue;
+    for (const [dayKey, seconds] of Object.entries(s.active_by_day)) {
+      if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {} });
+      dayMap.get(dayKey).elapsed_seconds += seconds;
     }
   }
 
@@ -245,48 +277,59 @@ function buildDaily(sessions, tz) {
       by_family: Object.fromEntries(
         Object.entries(d.by_family).map(([k, v]) => [k, { tokens: Math.round(v.tokens), cost: v.cost, sessions: v.sessions }])
       ),
+      by_repo: Object.fromEntries(
+        Object.entries(d.by_repo || {}).map(([k, v]) => [k, { tokens: Math.round(v.tokens), cost: v.cost, sessions: v.sessions }])
+      ),
       approximate: true,
     }));
 }
 
 function addToDay(dayMap, dayKey, session, fraction) {
-  if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {} });
+  if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
   const d = dayMap.get(dayKey);
   d.tokens += session.tokens_used * fraction;
   if (session.cost !== null) d.cost += session.cost * fraction;
-  d.elapsed_seconds += (session.elapsed_seconds || 0) * fraction;
   if (fraction > 0.001) d.sessions++;
 
   const mKey = session.model_name || 'unknown';
   if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
   d.by_model[mKey].tokens += session.tokens_used * fraction;
   if (session.cost !== null) d.by_model[mKey].cost += session.cost * fraction;
-  d.by_model[mKey].elapsed_seconds += (session.elapsed_seconds || 0) * fraction;
 
   const fKey = session.agent_family;
   if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0 };
   d.by_family[fKey].tokens += session.tokens_used * fraction;
   if (session.cost !== null) d.by_family[fKey].cost += session.cost * fraction;
   if (fraction > 0.001) d.by_family[fKey].sessions++;
+
+  const rKey = session.repo_label || 'unknown';
+  if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, sessions: 0 };
+  d.by_repo[rKey].tokens += session.tokens_used * fraction;
+  if (session.cost !== null) d.by_repo[rKey].cost += session.cost * fraction;
+  if (fraction > 0.001) d.by_repo[rKey].sessions++;
 }
 
-function buildHeatmap(sessions, tz) {
+function buildHeatmap(rawSessions, groupedSessions, tz) {
+  const toDayKeyInTz = createDayKeyFormatter(tz);
   const dayMap = new Map();
-  for (const s of sessions) {
+  for (const s of rawSessions) {
     if (!s.started_at) continue;
-    const dk = toDayKey(s.started_at * 1000, tz);
+    const dk = toDayKeyInTz(s.started_at * 1000);
     if (!dayMap.has(dk)) dayMap.set(dk, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
     const d = dayMap.get(dk);
     d.tokens += s.tokens_used;
     if (s.cost !== null) d.cost += s.cost;
-    d.elapsed += s.elapsed_seconds || 0;
     d.sessions++;
   }
-  return Object.fromEntries(dayMap);
-}
 
-function toDayKey(ms, tz) {
-  return new Date(ms).toLocaleDateString('en-CA', { timeZone: tz });
+  for (const s of groupedSessions) {
+    if (!s.active_by_day) continue;
+    for (const [dayKey, seconds] of Object.entries(s.active_by_day)) {
+      if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
+      dayMap.get(dayKey).elapsed += seconds;
+    }
+  }
+  return Object.fromEntries(dayMap);
 }
 
 function dayStartMs(dayKey) {
@@ -314,14 +357,18 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
   let startedAt = Infinity;
   let endedAt = -Infinity;
   let tokensUsed = 0;
+  let elapsedSeconds = 0;
   let cost = 0;
   let hasCost = false;
   const agentFamilySet = new Set();
+  const activeByDay = new Map();
 
   for (const session of group) {
     if (session.started_at && session.started_at < startedAt) startedAt = session.started_at;
     if (session.ended_at && session.ended_at > endedAt) endedAt = session.ended_at;
     tokensUsed += session.tokens_used || 0;
+    elapsedSeconds += session.elapsed_seconds || 0;
+    mergeActiveByDay(activeByDay, session.active_by_day);
     if (session.cost !== null) {
       cost += session.cost;
       hasCost = true;
@@ -347,7 +394,8 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
     is_subagent: false,
     started_at: rootStartedAt,
     ended_at: rootEndedAt,
-    elapsed_seconds: rootStartedAt && rootEndedAt && rootEndedAt > rootStartedAt ? (rootEndedAt - rootStartedAt) : root.elapsed_seconds,
+    elapsed_seconds: elapsedSeconds || null,
+    active_by_day: activeByDay.size > 0 ? Object.fromEntries(activeByDay) : null,
     tokens_used: tokensUsed,
     cost: hasCost ? cost : null,
     title: root.title,
@@ -370,4 +418,11 @@ function pickSummaryValue(values) {
   if (values.size === 0) return null;
   if (values.size === 1) return [...values][0];
   return `${[...values][0]} +${values.size - 1}`;
+}
+
+function mergeActiveByDay(target, source) {
+  if (!source) return;
+  for (const [dayKey, seconds] of Object.entries(source)) {
+    target.set(dayKey, (target.get(dayKey) || 0) + (seconds || 0));
+  }
 }
