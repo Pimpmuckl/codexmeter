@@ -4,7 +4,7 @@ import {
   normalizeCwd, deriveRepoKey, deriveRepoLabel,
   classifyAgentFamily, isSubagent, normalizeModelName,
 } from './normalize.js';
-import { estimateCost } from './cost-catalog.js';
+import { initPricing, estimateCost } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
 
 export function createIngestState() {
@@ -41,6 +41,8 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.total_threads = threads.length;
     state.percent = 0.2;
     state.phase = 'normalizing';
+
+    await initPricing();
 
     const sessions = [];
     for (const t of threads) {
