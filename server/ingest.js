@@ -1,5 +1,6 @@
 import { readThreads } from './sqlite-reader.js';
 import { enrichFromRollout } from './rollout-reader.js';
+import { randomUUID } from 'crypto';
 import {
   normalizeCwd, deriveRepoKey, deriveRepoLabel,
   classifyAgentFamily, isSubagent, normalizeModelName,
@@ -7,9 +8,11 @@ import {
 import { initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
 import { createDayKeyFormatter } from './day-key.js';
+import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap, buildLivePatch } from './live-state.js';
 
 export function createIngestState() {
   return {
+    ingest_id: randomUUID(),
     phase: 'idle',
     total_threads: 0,
     inventoried: 0,
@@ -22,6 +25,12 @@ export function createIngestState() {
     sessions: [],
     aggregates: null,
     generated_at: null,
+    live_state: null,
+    live_seq: 0,
+    live_subscribers: new Set(),
+    live_flush_timer: null,
+    live_pending_patch: createEmptyLivePatch(),
+    live_progress_dirty: false,
   };
 }
 
@@ -30,19 +39,23 @@ export async function runIngest(codexHome, state, opts = {}) {
   const toDayKey = createDayKeyFormatter(tz);
 
   try {
+    state.live_state = createLiveAggregateState(tz);
     state.phase = 'inventory';
     state.percent = 0;
+    queueLiveProgress(state);
 
     const threads = readThreads(codexHome, ({ total, read }) => {
       state.total_threads = total;
       state.inventoried = read;
       state.percent = total > 0 ? (read / total) * 0.08 : 0;
+      queueLiveProgress(state);
     });
 
     state.inventoried = threads.length;
     state.total_threads = threads.length;
-    state.percent = 0;
+    state.percent = 0.08;
     state.phase = 'normalizing';
+    queueLiveProgress(state);
 
     await initPricing();
 
@@ -78,13 +91,25 @@ export async function runIngest(codexHome, state, opts = {}) {
     }
 
     state.phase = 'enrichment';
+    queueLiveProgress(state);
+
+    const bootstrapSessions = sessions.filter((session) => !session.rollout_path);
+    if (bootstrapSessions.length) {
+      assignRootThreadIds(sessions);
+      const bootstrapPatch = createEmptyLivePatch();
+      for (const session of bootstrapSessions) {
+        finalizeSessionMetrics(session, toDayKey);
+        applySessionToLiveState(state.live_state, session, bootstrapPatch);
+      }
+      queueLivePatch(state, bootstrapPatch);
+    }
 
     const candidates = sessions
       .filter(s => s.rollout_path)
       .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
 
     state.needs_enrichment = candidates.length;
-    state.percent = candidates.length > 0 ? 0 : 0.90;
+    state.percent = candidates.length > 0 ? 0.08 : 0.90;
     const BATCH_SIZE = 25;
     const PARTIAL_REBUILD_EVERY = opts.partialRebuildEvery || 250;
     let lastPartialRebuildCount = 0;
@@ -114,13 +139,22 @@ export async function runIngest(codexHome, state, opts = {}) {
             s.active_by_day = data.active_by_day || null;
           }
         }
+        finalizeSessionMetrics(s, toDayKey);
         s.materialized = true;
       }
 
+      assignRootThreadIds(sessions);
+      const livePatch = createEmptyLivePatch();
+      for (const session of batch) {
+        applySessionToLiveState(state.live_state, session, livePatch);
+      }
+      queueLivePatch(state, livePatch);
+
       state.enriched = Math.min(i + BATCH_SIZE, candidates.length);
       state.percent = candidates.length > 0
-        ? (state.enriched / candidates.length) * 0.90
+        ? 0.08 + (state.enriched / candidates.length) * 0.82
         : 0.90;
+      queueLiveProgress(state);
 
       const shouldRebuildPartial =
         state.enriched === batch.length ||
@@ -135,39 +169,28 @@ export async function runIngest(codexHome, state, opts = {}) {
     }
 
     for (const s of sessions) {
-      if (s.elapsed_seconds === null) {
-        const fallback = (s.ended_at || 0) - (s.started_at || 0);
-        if (fallback > 0 && fallback < 3600) {
-          s.elapsed_seconds = fallback;
-          if (s.started_at) {
-            const dayKey = toDayKey(s.started_at * 1000);
-            s.active_by_day = { [dayKey]: fallback };
-          }
-        }
-      }
-      const priced = priceSession(s.model_name, {
-        totalTokens: s.tokens_used,
-        usageBuckets: s.usage_total,
-      });
-      s.cost = priced.cost;
-      s.cost_source = priced.source;
+      finalizeSessionMetrics(s, toDayKey);
     }
 
     assignRootThreadIds(sessions);
 
     state.phase = 'aggregation';
     state.percent = state.needs_enrichment > 0 ? 0.95 : 0.90;
+    queueLiveProgress(state);
 
     rebuildAggregates(sessions, state, opts, tz);
     state.percent = 1;
     state.phase = 'complete';
     state.complete = true;
     state.current_date_bucket = null;
+    queueLiveProgress(state);
+    flushLive(state, 'complete');
 
   } catch (err) {
     state.error = err.message;
     state.phase = 'error';
     console.error('Ingest error:', err);
+    flushLive(state, 'ingest-error');
   }
 }
 
@@ -245,4 +268,137 @@ function assignRootThreadIds(sessions) {
   for (const session of sessions) {
     session.root_thread_id = resolveRoot(session) || session.thread_id;
   }
+}
+
+function finalizeSessionMetrics(session, toDayKey) {
+  if (session.elapsed_seconds === null) {
+    const fallback = (session.ended_at || 0) - (session.started_at || 0);
+    if (fallback > 0 && fallback < 3600) {
+      session.elapsed_seconds = fallback;
+      if (session.started_at) {
+        const dayKey = toDayKey(session.started_at * 1000);
+        session.active_by_day = { [dayKey]: fallback };
+      }
+    }
+  }
+
+  if (session.cost === null) {
+    const priced = priceSession(session.model_name, {
+      totalTokens: session.tokens_used,
+      usageBuckets: session.usage_total,
+    });
+    session.cost = priced.cost;
+    session.cost_source = priced.source;
+  }
+}
+
+function queueLiveProgress(state) {
+  state.live_progress_dirty = true;
+  scheduleLiveFlush(state);
+}
+
+function queueLivePatch(state, patch) {
+  mergePatchInto(state.live_pending_patch, patch);
+  state.live_progress_dirty = true;
+  scheduleLiveFlush(state);
+}
+
+function scheduleLiveFlush(state) {
+  if (state.live_flush_timer) return;
+  state.live_flush_timer = setTimeout(() => flushLive(state), 50);
+}
+
+function flushLive(state, forcedEvent = null) {
+  if (state.live_flush_timer) {
+    clearTimeout(state.live_flush_timer);
+    state.live_flush_timer = null;
+  }
+  if (!state.live_subscribers.size) {
+    state.live_pending_patch = createEmptyLivePatch();
+    state.live_progress_dirty = false;
+    return;
+  }
+
+  const patchEmpty = isPatchEmpty(state.live_pending_patch);
+  const event = forcedEvent || (!patchEmpty ? 'patch' : 'progress');
+  const payload = {
+    ingest_id: state.ingest_id,
+    seq: ++state.live_seq,
+    progress: progressPayload(state),
+  };
+
+  if (event === 'patch') {
+    payload.data = buildLivePatch(state.live_state, state.live_pending_patch);
+  } else if (event === 'complete' || event === 'bootstrap') {
+    payload.data = buildLiveBootstrap(state.live_state);
+  }
+
+  broadcastLive(state, event, payload);
+  state.live_pending_patch = createEmptyLivePatch();
+  state.live_progress_dirty = false;
+}
+
+function broadcastLive(state, event, payload) {
+  const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of state.live_subscribers) {
+    try {
+      res.write(data);
+    } catch {
+      state.live_subscribers.delete(res);
+    }
+  }
+}
+
+function mergePatchInto(target, source) {
+  for (const key of source.overview) target.overview.add(key);
+  mergeRangePatchSets(target.repos, source.repos);
+  mergeRangePatchSets(target.models, source.models);
+  mergeRangePatchSets(target.families, source.families);
+  for (const key of source.daily) target.daily.add(key);
+  for (const key of source.heatmap) target.heatmap.add(key);
+}
+
+function mergeRangePatchSets(target, source) {
+  for (const rangeKey of ['total', 'd7', 'd30']) {
+    for (const key of source[rangeKey]) target[rangeKey].add(key);
+  }
+}
+
+function isPatchEmpty(patch) {
+  return patch.overview.size === 0 &&
+    patch.repos.total.size === 0 && patch.repos.d7.size === 0 && patch.repos.d30.size === 0 &&
+    patch.models.total.size === 0 && patch.models.d7.size === 0 && patch.models.d30.size === 0 &&
+    patch.families.total.size === 0 && patch.families.d7.size === 0 && patch.families.d30.size === 0 &&
+    patch.daily.size === 0 &&
+    patch.heatmap.size === 0;
+}
+
+function progressPayload(state) {
+  return {
+    phase: state.phase,
+    total_threads: state.total_threads,
+    inventoried: state.inventoried,
+    needs_enrichment: state.needs_enrichment,
+    enriched: state.enriched,
+    current_date_bucket: state.current_date_bucket,
+    percent: state.percent,
+    complete: state.complete,
+    error: state.error,
+    generated_at: state.generated_at,
+  };
+}
+
+export function attachLiveSubscriber(state, res) {
+  state.live_subscribers.add(res);
+  const payload = {
+    ingest_id: state.ingest_id,
+    seq: ++state.live_seq,
+    progress: progressPayload(state),
+    data: buildLiveBootstrap(state.live_state || createLiveAggregateState(Intl.DateTimeFormat().resolvedOptions().timeZone)),
+  };
+  res.write(`event: bootstrap\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+export function detachLiveSubscriber(state, res) {
+  state.live_subscribers.delete(res);
 }

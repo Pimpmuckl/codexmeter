@@ -74,11 +74,11 @@ function DayDetail({ day, chartMode }) {
       <div className="model-detail-charts">
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Repos for day</div>
-          <ReactEChartsCore echarts={echarts} option={repoOption} style={{ width: '100%', height: '100%' }} theme="dark" />
+          <ReactEChartsCore echarts={echarts} option={repoOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
         </div>
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models for day</div>
-          <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" />
+          <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
         </div>
       </div>
     </div>
@@ -189,6 +189,7 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
           style={{ height: 400 }}
           theme="dark"
           notMerge={true}
+          lazyUpdate={true}
           onEvents={{
             click: (params) => {
               const date = params?.axisValue || params?.name;

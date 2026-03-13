@@ -1,7 +1,7 @@
 /** Shared ECharts animation defaults - faster than ECharts default (1000ms) */
 export const ECHARTS_ANIMATION = {
   animationDuration: 750,
-  animationDurationUpdate: 100,
+  animationDurationUpdate: 220,
   animationEasing: 'cubicOut',
   animationEasingUpdate: 'cubicOut',
 };
@@ -10,9 +10,9 @@ export const ECHARTS_ANIMATION = {
 export const ECHARTS_LABEL_ANIMATION = {
   show: true,
   animationDuration: 250,
-  animationDurationUpdate: 250,
+  animationDurationUpdate: 220,
   animationDelay: 250,
-  animationDelayUpdate: 250,
+  animationDelayUpdate: 180,
   animationEasing: 'cubicOut',
   animationEasingUpdate: 'cubicOut',
 };
@@ -25,9 +25,9 @@ export const ECHARTS_DONUT_ANIMATION = {
 /** Detail bar charts (Repos/Models/Daily) - delayed so they finish with donuts */
 export const ECHARTS_DETAIL_BAR_ANIMATION = {
   animationDuration: 700,
-  animationDurationUpdate: 100,
+  animationDurationUpdate: 220,
   animationDelay: 250,
-  animationDelayUpdate: 100,
+  animationDelayUpdate: 140,
   animationEasing: 'cubicOut',
   animationEasingUpdate: 'cubicOut',
 };
@@ -36,5 +36,5 @@ export const ECHARTS_DETAIL_BAR_ANIMATION = {
 export const ECHARTS_DETAIL_BAR_LABEL_ANIMATION = {
   ...ECHARTS_LABEL_ANIMATION,
   animationDelay: 950,
-  animationDelayUpdate: 950,
+  animationDelayUpdate: 360,
 };

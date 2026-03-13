@@ -74,11 +74,11 @@ function RepoDetailCharts({ repo, chartMode }) {
       <div className="model-detail-charts">
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models in repo</div>
-          <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" />
+          <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
         </div>
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work type in repo</div>
-          <ReactEChartsCore echarts={echarts} option={familyOption} style={{ width: '100%', height: '100%' }} theme="dark" />
+          <ReactEChartsCore echarts={echarts} option={familyOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
         </div>
       </div>
       <div className="model-detail-footer">
@@ -180,6 +180,7 @@ export default function Repos({ data, chartMode = 'default' }) {
           option={option}
           style={{ height: Math.max(250, top.length * 28) }}
           theme="dark"
+          lazyUpdate={true}
           onEvents={{
             click: (params) => {
               if (params?.componentType === 'series' && params?.dataIndex != null) {

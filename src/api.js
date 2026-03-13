@@ -11,6 +11,7 @@ async function fetchJson(endpoint) {
 }
 
 export const api = {
+  url: apiUrl,
   progress: () => fetchJson('/api/progress'),
   overview: () => fetchJson('/api/overview'),
   repos: () => fetchJson('/api/repos'),
@@ -19,4 +20,5 @@ export const api = {
   sessions: (q = '') => fetchJson(`/api/sessions${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   heatmap: () => fetchJson('/api/heatmap'),
   families: () => fetchJson('/api/families'),
+  live: () => new EventSource(apiUrl('/api/live')),
 };

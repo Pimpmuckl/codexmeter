@@ -93,15 +93,15 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
       <div className="model-detail-charts">
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Sessions by effort</div>
-          <ReactEChartsCore echarts={echarts} option={runsOption} style={{ width: '100%', height: '100%' }} theme="dark" />
+          <ReactEChartsCore echarts={echarts} option={runsOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
         </div>
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Tokens by effort</div>
-          <ReactEChartsCore echarts={echarts} option={tokensOption} style={{ width: '100%', height: '100%' }} theme="dark" />
+          <ReactEChartsCore echarts={echarts} option={tokensOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
         </div>
         <div className="model-detail-bar">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Avg tokens per session</div>
-          <ReactEChartsCore echarts={echarts} option={perRunOption} style={{ width: '100%', height: '100%' }} theme="dark" />
+          <ReactEChartsCore echarts={echarts} option={perRunOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
         </div>
       </div>
       <div className="model-detail-footer">
@@ -204,6 +204,7 @@ export default function Models({ data, chartMode = 'default' }) {
           option={option}
           style={{ height: Math.max(180, models.length * 34) }}
           theme="dark"
+          lazyUpdate={true}
           onEvents={{
             click: (params) => {
               if (params?.componentType === 'series' && params?.dataIndex != null) {

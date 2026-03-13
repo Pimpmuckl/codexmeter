@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createIngestState, runIngest } from './ingest.js';
+import { attachLiveSubscriber, createIngestState, detachLiveSubscriber, runIngest } from './ingest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +26,28 @@ export function createServer(codexHome, opts = {}) {
       percent: state.percent,
       complete: state.complete,
       error: state.error,
+    });
+  });
+
+  app.get('/api/live', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (res.flushHeaders) res.flushHeaders();
+
+    attachLiveSubscriber(state, res);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`event: heartbeat\ndata: ${JSON.stringify({ ingest_id: state.ingest_id, seq: state.live_seq })}\n\n`);
+      } catch {}
+    }, 10000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      detachLiveSubscriber(state, res);
+      res.end();
     });
   });
 

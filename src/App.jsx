@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from './api';
 import Overview from './components/Overview';
 import Repos from './components/Repos';
 import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
+import { buildLiveDataEnvelope, mergeLiveEvent } from './live-state';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
@@ -26,6 +27,7 @@ const PHASE_LABELS = {
   enrichment: 'Enriching rollouts',
   aggregation: 'Building aggregates',
   complete: 'Complete',
+  error: 'Error',
 };
 
 export default function App() {
@@ -33,6 +35,7 @@ export default function App() {
   const [tab, setTab] = useState('Overview');
   const [range, setRange] = useState('total');
   const [data, setData] = useState({});
+  const [liveState, setLiveState] = useState(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [fadingOut, setFadingOut] = useState(false);
 
@@ -50,43 +53,148 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    let interval;
+    let interval = null;
+    let source = null;
+    let usingFallback = false;
+    let terminalSseState = false;
 
-    async function poll() {
-      try {
-        const p = await api.progress();
-        if (!alive) return;
-        setProgress(p);
+    const applyLivePayload = (payload, mode) => {
+      setProgress(payload.progress);
+      setLiveState((prev) => {
+        if (prev && payload.ingest_id === prev.ingest_id && payload.seq <= prev.seq) return prev;
+        return mergeLiveEvent(prev, payload, mode);
+      });
+    };
 
-        if (p.percent > 0.1) {
-          await fetchAll();
-        }
+    const startFallbackPolling = () => {
+      if (usingFallback || !alive) return;
+      usingFallback = true;
 
-        if (p.percent > 0.1 && showOverlay && !fadingOut) {
-          setFadingOut(true);
-          setTimeout(() => { if (alive) setShowOverlay(false); }, 600);
-        }
+      const poll = async () => {
+        try {
+          const p = await api.progress();
+          if (!alive) return;
+          setProgress(p);
 
-        if (p.complete) {
-          await fetchAll();
-          clearInterval(interval);
-          if (showOverlay) {
-            setFadingOut(true);
-            setTimeout(() => { if (alive) setShowOverlay(false); }, 600);
+          if (p.percent > 0.1) {
+            await fetchAll();
           }
-        }
-      } catch {}
-    }
 
-    poll();
-    interval = setInterval(poll, 1200);
-    return () => { alive = false; clearInterval(interval); };
-  }, [fetchAll, showOverlay, fadingOut]);
+          if (p.complete) {
+            await fetchAll();
+            clearInterval(interval);
+            setLiveState(null);
+            return;
+          }
+
+          if (p.error || p.phase === 'error') {
+            clearInterval(interval);
+          }
+        } catch (err) {
+          console.error('Polling fallback error:', err);
+        }
+      };
+
+      poll();
+      interval = setInterval(poll, 1200);
+    };
+
+    const startLive = () => {
+      if (typeof EventSource === 'undefined') {
+        startFallbackPolling();
+        return;
+      }
+
+      source = api.live();
+
+      source.addEventListener('bootstrap', (event) => {
+        if (!alive) return;
+        const payload = JSON.parse(event.data);
+        applyLivePayload(payload, 'bootstrap');
+      });
+
+      source.addEventListener('progress', (event) => {
+        if (!alive) return;
+        const payload = JSON.parse(event.data);
+        setProgress(payload.progress);
+      });
+
+      source.addEventListener('patch', (event) => {
+        if (!alive) return;
+        const payload = JSON.parse(event.data);
+        applyLivePayload(payload, 'patch');
+      });
+
+      source.addEventListener('complete', async (event) => {
+        if (!alive) return;
+        const payload = JSON.parse(event.data);
+        terminalSseState = true;
+        applyLivePayload(payload, 'patch');
+        await fetchAll();
+        if (!alive) return;
+        setLiveState(null);
+        source?.close();
+      });
+
+      source.addEventListener('ingest-error', (event) => {
+        if (!alive) return;
+        const payload = JSON.parse(event.data);
+        terminalSseState = true;
+        setProgress(payload.progress);
+        source?.close();
+      });
+
+      source.addEventListener('error', (event) => {
+        if (!alive) return;
+        if (terminalSseState) return;
+        console.error('SSE stream error:', event);
+        source?.close();
+        startFallbackPolling();
+      });
+    };
+
+    fetchAll();
+    startLive();
+
+    return () => {
+      alive = false;
+      clearInterval(interval);
+      source?.close();
+    };
+  }, [fetchAll]);
+
+  useEffect(() => {
+    if (tab !== 'Sessions' || data?.sessions?.data) return;
+    api.sessions().then((sessions) => {
+      setData((prev) => ({ ...prev, sessions }));
+    }).catch((err) => {
+      console.error('Sessions fetch error:', err);
+    });
+  }, [tab, data?.sessions]);
+
+  useEffect(() => {
+    if (!progress) return;
+    if (progress.percent > 0.1 && showOverlay && !fadingOut) {
+      setFadingOut(true);
+      const timer = setTimeout(() => setShowOverlay(false), 600);
+      return () => clearTimeout(timer);
+    }
+    if (progress.complete && showOverlay && !fadingOut) {
+      setFadingOut(true);
+      const timer = setTimeout(() => setShowOverlay(false), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [progress, showOverlay, fadingOut]);
 
   const complete = progress?.complete;
   const pct = Math.round((progress?.percent || 0) * 100);
 
-  const ov = data?.overview?.data;
+  const liveData = useMemo(() => (
+    !progress?.complete && liveState ? buildLiveDataEnvelope(liveState, progress) : null
+  ), [liveState, progress]);
+  const effectiveData = liveData ? { ...data, ...liveData, sessions: data.sessions } : data;
+
+  const ov = effectiveData?.overview?.data;
   const d = ov?.[range] || ov?.total || {};
   const dateRange = d?.date_range;
 
@@ -104,6 +212,9 @@ export default function App() {
               {progress.enriched}/{progress.needs_enrichment} rollouts
               {progress.current_date_bucket && ` — ${progress.current_date_bucket}`}
             </div>
+          )}
+          {progress?.phase === 'error' && progress?.error && (
+            <div className="loading-detail">{progress.error}</div>
           )}
           <div className="loading-footer">Made with <span className="loading-heart">♥</span> by JJ</div>
         </div>
@@ -148,11 +259,11 @@ export default function App() {
         </nav>
 
         <div className="main-content">
-          {tab === 'Overview' && <Overview data={data.overview} heatmap={data.heatmap} daily={data.daily} families={data.families} repos={data.repos} models={data.models} range={range} />}
-          {tab === 'Repos' && <Repos data={data.repos} />}
-          {tab === 'Models' && <Models data={data.models} />}
-          {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}
-          {tab === 'Sessions' && <Sessions data={data.sessions} />}
+          {tab === 'Overview' && <Overview data={effectiveData.overview} heatmap={effectiveData.heatmap} daily={effectiveData.daily} families={effectiveData.families} repos={effectiveData.repos} models={effectiveData.models} range={range} />}
+          {tab === 'Repos' && <Repos data={effectiveData.repos} />}
+          {tab === 'Models' && <Models data={effectiveData.models} />}
+          {tab === 'Daily' && <DailyUsage data={effectiveData.daily} range={range} />}
+          {tab === 'Sessions' && <Sessions data={effectiveData.sessions} />}
         </div>
         <div className="app-footer">Made with <span className="loading-heart">♥</span> by JJ</div>
       </div>
