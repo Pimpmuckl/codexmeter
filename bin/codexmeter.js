@@ -29,8 +29,19 @@ const app = createServer(opts.codexHome, {
 
 const port = parseInt(opts.port, 10) || 0;
 
-const server = app.listen(port, '127.0.0.1', async () => {
+const server = app.listen(port, '127.0.0.1');
+
+server.once('error', (err) => {
+  console.error(`Failed to start codexmeter on 127.0.0.1:${port || 'auto'}: ${err.message}`);
+  process.exit(1);
+});
+
+server.once('listening', async () => {
   const addr = server.address();
+  if (!addr || typeof addr === 'string') {
+    console.error('Failed to resolve codexmeter listen address.');
+    process.exit(1);
+  }
   const url = `http://127.0.0.1:${addr.port}`;
   console.log(`\n  codexmeter → ${url}\n`);
 

@@ -46,3 +46,6 @@ node_modules/better-sqlite3/build/
 # To Do/Planning files
 impl.md
 todo.md
+
+# Tools
+.playwright-cli

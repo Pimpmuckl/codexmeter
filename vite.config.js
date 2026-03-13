@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const apiTarget = process.env.CODEXMETER_API_URL || 'http://127.0.0.1:3210';
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -9,7 +11,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:3210',
+      '/api': apiTarget,
     },
   },
 });
