@@ -6,11 +6,19 @@
   "bin": {
     "codexmeter": "./bin/codexmeter.js"
   },
+  "files": [
+    "bin",
+    "server",
+    "dist",
+    "README.md",
+    "package.json"
+  ],
   "scripts": {
     "dev": "node dev-runner.js",
     "build": "vite build",
     "start": "node bin/codexmeter.js",
-    "preview": "npm run build && node bin/codexmeter.js"
+    "preview": "npm run build && node bin/codexmeter.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
