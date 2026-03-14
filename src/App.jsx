@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from './api';
 import Overview from './components/Overview';
 import Repos from './components/Repos';
@@ -43,6 +43,8 @@ export default function App() {
   const [ingestFadeDone, setIngestFadeDone] = useState(false);
   const [rerunning, setRerunning] = useState(false);
   const [overviewPresentationSettled, setOverviewPresentationSettled] = useState(true);
+  const [completionPresentationPending, setCompletionPresentationPending] = useState(false);
+  const prevBackendCompleteRef = useRef(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -247,7 +249,8 @@ export default function App() {
   const complete = backendComplete;
   const pct = Math.round((progress?.percent || 0) * 100);
   const overviewIngestProgress = Math.min(Math.max(progress?.percent || 0, 0), 1);
-  const overviewIngestActive = Boolean(progress && !backendComplete && progress.phase !== 'error');
+  const visibleIngesting = !backendComplete || completionPresentationPending;
+  const overviewIngestActive = Boolean(progress && visibleIngesting && progress.phase !== 'error');
 
   useEffect(() => {
     if (!progress?.complete) {
@@ -256,12 +259,31 @@ export default function App() {
   }, [progress?.complete]);
 
   useEffect(() => {
-    if (complete && !ingestFadeOut) setIngestFadeOut(true);
-    if (!complete) {
+    const justCompleted = backendComplete && !prevBackendCompleteRef.current;
+    prevBackendCompleteRef.current = backendComplete;
+
+    if (!backendComplete) {
+      setCompletionPresentationPending(false);
+      return;
+    }
+
+    if (justCompleted && !overviewPresentationSettled) {
+      setCompletionPresentationPending(true);
+      return;
+    }
+
+    if (completionPresentationPending && overviewPresentationSettled) {
+      setCompletionPresentationPending(false);
+    }
+  }, [backendComplete, overviewPresentationSettled, completionPresentationPending]);
+
+  useEffect(() => {
+    if (!visibleIngesting && !ingestFadeOut) setIngestFadeOut(true);
+    if (visibleIngesting) {
       setIngestFadeOut(false);
       setIngestFadeDone(false);
     }
-  }, [complete, ingestFadeOut]);
+  }, [visibleIngesting, ingestFadeOut]);
   useEffect(() => {
     if (!ingestFadeOut) return;
     const t = setTimeout(() => setIngestFadeDone(true), 350);
@@ -321,7 +343,7 @@ export default function App() {
             ))}
           </div>
           <div className="navbar-meta">
-            {(!backendComplete || !ingestFadeDone) && (
+            {(visibleIngesting || !ingestFadeDone) && (
               <div className={`navbar-ingest-wrap ${ingestFadeOut ? 'navbar-ingest-fade-out' : ''}`}>
                 <div className="navbar-progress-wrap">
                   <div className="navbar-progress-bar" style={{ width: `${pct}%` }} />

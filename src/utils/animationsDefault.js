@@ -176,6 +176,15 @@ export function resolveOverviewPresentationEasing(progress = 0, isIngestActive =
   return tail.easing || 'cubicOut';
 }
 
+export function isOverviewTailActive(progress = 0, isIngestActive = false) {
+  const tail = OVERVIEW_INGEST_ANIMATION.tail;
+  if (!isIngestActive || !tail?.enabled) return false;
+
+  const start = Math.min(Math.max(tail.startPercent ?? 0.9, 0), 0.999);
+  const clampedProgress = Math.min(Math.max(progress || 0, 0), 1);
+  return clampedProgress > start;
+}
+
 /** Overview page - resolved main animation config */
 export const ECHARTS_OVERVIEW_ANIMATION = buildOverviewChartAnimation({
   chartAppearDurationMs: AUTO,

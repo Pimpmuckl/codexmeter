@@ -4,6 +4,7 @@ import {
   OVERVIEW_PRESENTATION_DURATION_MS,
   resolveOverviewPresentationDuration,
   resolveOverviewPresentationEasing,
+  isOverviewTailActive,
 } from '../utils/animationsDefault';
 
 export function useAnimatedOverviewPresentation(
@@ -28,6 +29,10 @@ export function useAnimatedOverviewPresentation(
   const animatedRef = useRef(animated);
   const settledRef = useRef(true);
   const onSettledChangeRef = useRef(onSettledChange);
+  const tweenStartRef = useRef(0);
+  const tweenFromRef = useRef(target);
+  const tweenTargetRef = useRef(target);
+  const tweenModeRef = useRef('smooth');
 
   useEffect(() => {
     onSettledChangeRef.current = onSettledChange;
@@ -53,6 +58,17 @@ export function useAnimatedOverviewPresentation(
       return undefined;
     }
     emitSettled(false);
+    const nextTailActive = isOverviewTailActive(ingestProgress, isIngestActive);
+    const nextMode = nextTailActive ? 'tail' : 'smooth';
+    if (tweenModeRef.current !== nextMode) {
+      tweenModeRef.current = nextMode;
+      tweenStartRef.current = 0;
+    }
+    if (nextMode === 'tail') {
+      tweenFromRef.current = currentRef.current;
+      tweenTargetRef.current = target;
+      tweenStartRef.current = 0;
+    }
     if (frameRef.current) return undefined;
 
     const threshold = 0.002;
@@ -61,18 +77,46 @@ export function useAnimatedOverviewPresentation(
       const dt = Math.max(1, now - lastFrameRef.current);
       lastFrameRef.current = now;
       const effectiveDuration = resolveOverviewPresentationDuration(ingestProgress, isIngestActive) || duration;
-      const alphaBase = 1 - Math.exp(-dt / Math.max(effectiveDuration, 1));
-      const alpha = applyPresentationEasing(
-        alphaBase,
-        resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
-      );
 
       const latestTarget = targetRef.current;
       const current = currentRef.current;
-      const next = interpolateOverviewPresentation(current, latestTarget, alpha);
+      const tailActive = isOverviewTailActive(ingestProgress, isIngestActive);
+      const nextModeInner = tailActive ? 'tail' : 'smooth';
+      if (tweenModeRef.current !== nextModeInner) {
+        tweenModeRef.current = nextModeInner;
+        tweenStartRef.current = 0;
+      }
+
+      let next;
+      let settled;
+
+      if (nextModeInner === 'tail') {
+        if (tweenTargetRef.current !== latestTarget) {
+          tweenFromRef.current = current;
+          tweenTargetRef.current = latestTarget;
+          tweenStartRef.current = now;
+        }
+        if (!tweenStartRef.current) tweenStartRef.current = now;
+        const elapsed = Math.max(0, now - tweenStartRef.current);
+        const rawT = Math.min(1, elapsed / Math.max(effectiveDuration, 1));
+        const easedT = applyPresentationEasing(
+          rawT,
+          resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
+        );
+        next = interpolateOverviewPresentation(tweenFromRef.current, tweenTargetRef.current, easedT);
+        settled = rawT >= 1 || presentationDistance(next, latestTarget) <= threshold;
+      } else {
+        const alphaBase = 1 - Math.exp(-dt / Math.max(effectiveDuration, 1));
+        const alpha = applyPresentationEasing(
+          alphaBase,
+          resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
+        );
+        next = interpolateOverviewPresentation(current, latestTarget, alpha);
+        settled = alpha >= 0.999 || presentationDistance(next, latestTarget) <= threshold;
+      }
+
       currentRef.current = next;
 
-      const settled = alpha >= 0.999 || presentationDistance(next, latestTarget) <= threshold;
       if (settled) {
         currentRef.current = latestTarget;
         animatedRef.current = latestTarget;
@@ -80,6 +124,9 @@ export function useAnimatedOverviewPresentation(
         emitSettled(true);
         frameRef.current = 0;
         lastFrameRef.current = 0;
+        tweenStartRef.current = 0;
+        tweenFromRef.current = latestTarget;
+        tweenTargetRef.current = latestTarget;
         return;
       }
 
