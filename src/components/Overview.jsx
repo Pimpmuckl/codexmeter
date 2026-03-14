@@ -206,6 +206,8 @@ function Overview({
   const { stats, topRepos, topFamilies, topModels } = presentation;
   const reversedRepos = [...topRepos.slice(0, 6)].reverse();
   const maxRepoTokens = Math.max(...topRepos.slice(0, 6).map(row => row.tokens || 0), 1);
+  const orderedFamilies = [...topFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const orderedModels = [...topModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
   const repoOption = {
     backgroundColor: 'transparent',
@@ -255,7 +257,7 @@ function Overview({
     }],
   };
 
-  const familyTotal = topFamilies.reduce((sum, row) => sum + (row.tokens || 0), 0);
+  const familyTotal = orderedFamilies.reduce((sum, row) => sum + (row.tokens || 0), 0);
   const familyOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
@@ -273,7 +275,7 @@ function Overview({
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: topFamilies.map((row) => {
+      data: orderedFamilies.map((row) => {
         const pct = familyTotal > 0 ? (row.tokens || 0) / familyTotal : 0;
         const showLabel = pct >= 0.01;
         return {
@@ -287,7 +289,7 @@ function Overview({
     }],
   };
 
-  const modelTotal = topModels.slice(0, 6).reduce((sum, row) => sum + (row.tokens || 0), 0);
+  const modelTotal = orderedModels.reduce((sum, row) => sum + (row.tokens || 0), 0);
   const modelOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
@@ -305,7 +307,7 @@ function Overview({
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: topModels.slice(0, 6).map((row) => {
+      data: orderedModels.map((row) => {
         const pct = modelTotal > 0 ? (row.tokens || 0) / modelTotal : 0;
         const showLabel = pct >= 0.01;
         return {

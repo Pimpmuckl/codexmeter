@@ -27,7 +27,7 @@ const METRICS = [
 
 const SPLIT_MODES = [
   { key: 'model', label: 'By Model' },
-  { key: 'family', label: 'By Family' },
+  { key: 'family', label: 'By Work' },
 ];
 
 const DISPLAY_MODES = [
@@ -376,6 +376,7 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
           style={{ height: 400 }}
           theme="dark"
           notMerge={false}
+          replaceMerge={['series', 'legend', 'graphic']}
           lazyUpdate={true}
           onChartReady={updateGraphicLabels}
           onEvents={{

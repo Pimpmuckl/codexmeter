@@ -243,10 +243,11 @@ export default function App() {
     }
   }, [progress, showOverlay, fadingOut]);
 
-  const complete = Boolean(progress?.complete && overviewPresentationSettled);
+  const backendComplete = Boolean(progress?.complete);
+  const complete = backendComplete;
   const pct = Math.round((progress?.percent || 0) * 100);
   const overviewIngestProgress = Math.min(Math.max(progress?.percent || 0, 0), 1);
-  const overviewIngestActive = Boolean(progress && !progress.complete && progress.phase !== 'error');
+  const overviewIngestActive = Boolean(progress && !backendComplete && progress.phase !== 'error');
 
   useEffect(() => {
     if (!progress?.complete) {
@@ -311,16 +312,16 @@ export default function App() {
             {TABS.map(t => (
               <button
                 key={t}
-                className={`navbar-tab ${tab === t ? 'active' : ''} ${!(complete && ingestFadeDone) && t !== 'Overview' ? 'navbar-tab-dimmed' : ''}`}
+                className={`navbar-tab ${tab === t ? 'active' : ''} ${!(backendComplete && ingestFadeDone) && t !== 'Overview' ? 'navbar-tab-dimmed' : ''}`}
                 onClick={() => setTab(t)}
-                disabled={!complete && t !== 'Overview'}
+                disabled={!backendComplete && t !== 'Overview'}
               >
                 {t}
               </button>
             ))}
           </div>
           <div className="navbar-meta">
-            {(!complete || !ingestFadeDone) && (
+            {(!backendComplete || !ingestFadeDone) && (
               <div className={`navbar-ingest-wrap ${ingestFadeOut ? 'navbar-ingest-fade-out' : ''}`}>
                 <div className="navbar-progress-wrap">
                   <div className="navbar-progress-bar" style={{ width: `${pct}%` }} />
@@ -329,13 +330,13 @@ export default function App() {
               </div>
             )}
             {dateRange && (
-              <div className={`navbar-date-wrap ${!complete ? 'navbar-date-wrap-dimmed' : ''}`}>
+              <div className={`navbar-date-wrap ${!backendComplete ? 'navbar-date-wrap-dimmed' : ''}`}>
                 <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                   {fmtDate(dateRange.from)} — {fmtDate(dateRange.to)}
                 </span>
                 <div className="range-toggle">
                   {RANGES.map(r => (
-                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)} disabled={!complete}>
+                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)} disabled={!backendComplete}>
                       {r.label}
                     </button>
                   ))}
@@ -346,7 +347,7 @@ export default function App() {
                   aria-label="Rerun ingest"
                   title="Rerun ingest"
                   onClick={handleRerun}
-                  disabled={rerunning || !complete}
+                  disabled={rerunning || !backendComplete}
                 >
                   ↻
                 </button>
