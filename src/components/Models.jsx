@@ -36,6 +36,7 @@ function sortEffortEntries(entries) {
 function ModelDetailCharts({ model, fmt, chartMode }) {
   const [showDetails, setShowDetails] = useState(false);
   const effortData = useMemo(() => sortEffortEntries(Object.entries(model.by_effort || {})), [model.by_effort]);
+
   if (!effortData.length) return null;
 
   const summaryRows = effortData.map(([effort, v]) => ({
@@ -86,6 +87,7 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
     chartMode,
     defaultMode: 'bar',
     renderTitleInChart: false,
+    barLabelProgress,
   });
 
   return (
@@ -93,15 +95,15 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
       <div className="model-detail-charts">
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Sessions by effort</div>
-          <ReactEChartsCore echarts={echarts} option={runsOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
+          <ReactEChartsCore echarts={echarts} option={runsOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
         </div>
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Tokens by effort</div>
-          <ReactEChartsCore echarts={echarts} option={tokensOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
+          <ReactEChartsCore echarts={echarts} option={tokensOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
         </div>
         <div className="model-detail-bar">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Avg tokens per session</div>
-          <ReactEChartsCore echarts={echarts} option={perRunOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
+          <ReactEChartsCore echarts={echarts} option={perRunOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
         </div>
       </div>
       <div className="model-detail-footer">
@@ -186,7 +188,7 @@ export default function Models({ data, chartMode = 'default' }) {
         itemStyle: { color: getModelColor(m.model_name), borderRadius: [0, 3, 3, 0] },
       })),
       barMaxWidth: 18,
-      label: { show: true, position: 'right', formatter: p => fmt(p.value), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
+      label: { show: true, position: 'right', formatter: p => fmt(p.value ?? 0), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
     }],
   };
 
@@ -205,6 +207,7 @@ export default function Models({ data, chartMode = 'default' }) {
           style={{ height: Math.max(180, models.length * 34) }}
           theme="dark"
           lazyUpdate={true}
+          notMerge={false}
           onEvents={{
             click: (params) => {
               if (params?.componentType === 'series' && params?.dataIndex != null) {

@@ -41,3 +41,36 @@ export const ECHARTS_DETAIL_BAR_LABEL_ANIMATION = {
   animationDelay: 950,
   animationDelayUpdate: 360,
 };
+
+/** Overview page - base animation config */
+export const ECHARTS_OVERVIEW_ANIMATION = {
+  animationDuration: 600,
+  animationDurationUpdate: 250,
+  animationEasing: 'cubicOut',
+  animationEasingUpdate: 'cubicOut',
+};
+
+/** Overview DailySpark - compact stacked bar */
+export const ECHARTS_OVERVIEW_DAILY = {
+  ...ECHARTS_OVERVIEW_ANIMATION,
+  //animationDuration: 500,
+  //animationDurationUpdate: 180,
+};
+
+/** Overview Top Repos - horizontal bar chart */
+export const ECHARTS_OVERVIEW_BARS = {
+  ...ECHARTS_OVERVIEW_ANIMATION,
+  //animationDuration: 550,
+  //animationDurationUpdate: 170,
+};
+
+/** Count-up animation duration (ms) for Overview Top Repos bar labels - matches top bar stats */
+export const ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION = 400;
+
+/** Overview Work Type & Models - donut charts */
+export const ECHARTS_OVERVIEW_DONUTS = {
+  ...ECHARTS_OVERVIEW_ANIMATION,
+  //animationDuration: 580,
+  //animationDurationUpdate: 175,
+  //animationDelayUpdate: 0,
+};

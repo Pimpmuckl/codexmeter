@@ -310,7 +310,7 @@ export default function App() {
             {TABS.map(t => (
               <button
                 key={t}
-                className={`navbar-tab ${tab === t ? 'active' : ''}`}
+                className={`navbar-tab ${tab === t ? 'active' : ''} ${!(complete && ingestFadeDone) && t !== 'Overview' ? 'navbar-tab-dimmed' : ''}`}
                 onClick={() => setTab(t)}
                 disabled={!complete && t !== 'Overview'}
               >

@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { useCountUp } from '../hooks/useCountUp';
+import { useCountUp, useCountUpValues } from '../hooks/useCountUp';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor, getContrastLabelColor } from '../utils/colors';
-import { ECHARTS_ANIMATION, ECHARTS_DONUT_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
+import { ECHARTS_LABEL_ANIMATION, ECHARTS_OVERVIEW_DAILY, ECHARTS_OVERVIEW_BARS, ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION, ECHARTS_OVERVIEW_DONUTS } from '../utils/echartsDefaults';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
 
@@ -94,7 +94,7 @@ function DailySpark({ daily, range }) {
 
   const option = {
     backgroundColor: 'transparent',
-    ...ECHARTS_ANIMATION,
+    ...ECHARTS_OVERVIEW_DAILY,
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -199,7 +199,7 @@ function Heatmap({ heatmapData }) {
   );
 }
 
-const COUNT_DURATION = 180;
+const COUNT_DURATION = ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION;
 
 export default function Overview({ data, heatmap, daily, families, repos, models, range = 'total' }) {
   const ov = data?.data;
@@ -232,13 +232,18 @@ export default function Overview({ data, heatmap, daily, families, repos, models
   const topFamilies = familiesForRange;
   const topModels = modelsForRange.slice(0, 6);
 
+  const animTokens = useCountUpValues(
+    topRepos.map((r) => r.tokens ?? 0),
+    ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION
+  );
+
   if (!ov) return null;
 
   const reversedRepos = [...topRepos].reverse();
   const maxRepoTokens = Math.max(...topRepos.map(r => r.tokens || 0), 1);
   const repoOption = {
     backgroundColor: 'transparent',
-    ...ECHARTS_ANIMATION,
+    ...ECHARTS_OVERVIEW_BARS,
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -273,7 +278,10 @@ export default function Overview({ data, heatmap, daily, families, repos, models
             position: inside ? 'insideRight' : 'right',
             distance: 5,
             offset: [0, 1.5],
-            formatter: (p) => fmt(p.value),
+            formatter: (p) => {
+            const idx = reversedRepos.length - 1 - (p.dataIndex ?? 0);
+            return fmt(animTokens[Math.max(0, idx)] ?? 0);
+          },
             color: inside ? getContrastLabelColor(barColor) : '#8b949e',
             fontSize: 10,
             ...ECHARTS_LABEL_ANIMATION,
@@ -287,7 +295,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
   const familyTotal = topFamilies.reduce((s, f) => s + (f.tokens || 0), 0);
   const familyOption = {
     backgroundColor: 'transparent',
-    ...ECHARTS_DONUT_ANIMATION,
+    ...ECHARTS_OVERVIEW_DONUTS,
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -296,7 +304,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
-      ...ECHARTS_DONUT_ANIMATION,
+      ...ECHARTS_OVERVIEW_DONUTS,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}', ...ECHARTS_LABEL_ANIMATION },
@@ -319,7 +327,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
   const modelTotal = topModels.reduce((s, m) => s + (m.tokens || 0), 0);
   const modelOption = {
     backgroundColor: 'transparent',
-    ...ECHARTS_DONUT_ANIMATION,
+    ...ECHARTS_OVERVIEW_DONUTS,
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -328,7 +336,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
-      ...ECHARTS_DONUT_ANIMATION,
+      ...ECHARTS_OVERVIEW_DONUTS,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}', ...ECHARTS_LABEL_ANIMATION },
