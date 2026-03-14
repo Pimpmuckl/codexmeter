@@ -29,3 +29,17 @@
 - Next:
   - payload slimming and cadence shaping are now in progress for phase 2
   - next likely bottleneck is ECharts render cost rather than transport size
+- Began a dedicated ingest optimization pass after the live-stream checkpoint.
+- Verified current worktree before editing:
+  - clean ingest/live changes are committed at `8ecd267`
+  - one separate uncommitted UI tweak remains in `src/utils/echartsDefaults.js`
+- Current optimization hypothesis:
+  - later slowdown is caused by cumulative backend bookkeeping (`assignRootThreadIds` over all sessions each batch and oversized live-state accumulation), not only raw rollout parsing.
+- Implemented backend ingest optimizations:
+  - removed partial settled aggregate rebuilds during ingest
+  - reduced root-resolution refreshes from every batch to coarse periodic refreshes plus one final exact pass
+  - stripped unused nested live-state structures from live repo/model/daily accumulation
+- Validated:
+  - full real-data ingest completed in `39484ms` on `~/.codex`
+  - dataset size in that run: `4737` rollout-backed threads enriched to completion
+  - `npm run build` passes after the optimization changes

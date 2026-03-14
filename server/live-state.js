@@ -144,8 +144,6 @@ function applyRepoBucket(repoMap, session, dirtySet) {
       exact_priced: 0,
       heuristic_priced: 0,
       sessions: 0,
-      by_model: {},
-      by_family: {},
     });
   }
   const repo = repoMap.get(key);
@@ -158,33 +156,13 @@ function applyRepoBucket(repoMap, session, dirtySet) {
     if (session.cost_source === 'heuristic') repo.heuristic_priced += 1;
   }
 
-  const modelKey = session.model_name || 'unknown';
-  if (!repo.by_model[modelKey]) repo.by_model[modelKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
-  repo.by_model[modelKey].tokens += session.tokens_used || 0;
-  repo.by_model[modelKey].sessions += 1;
-  if (session.cost !== null) {
-    repo.by_model[modelKey].cost += session.cost;
-    if (session.cost_source === 'exact') repo.by_model[modelKey].exact_priced += 1;
-    if (session.cost_source === 'heuristic') repo.by_model[modelKey].heuristic_priced += 1;
-  }
-
-  const familyKey = session.agent_family || 'generic';
-  if (!repo.by_family[familyKey]) repo.by_family[familyKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
-  repo.by_family[familyKey].tokens += session.tokens_used || 0;
-  repo.by_family[familyKey].sessions += 1;
-  if (session.cost !== null) {
-    repo.by_family[familyKey].cost += session.cost;
-    if (session.cost_source === 'exact') repo.by_family[familyKey].exact_priced += 1;
-    if (session.cost_source === 'heuristic') repo.by_family[familyKey].heuristic_priced += 1;
-  }
-
   dirtySet.add(key);
 }
 
 function applyModelBucket(modelMap, session, dirtySet) {
   const key = session.model_name || 'unknown';
   if (!modelMap.has(key)) {
-    modelMap.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0, by_effort: {} });
+    modelMap.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0 });
   }
   const model = modelMap.get(key);
   model.tokens += session.tokens_used || 0;
@@ -194,16 +172,6 @@ function applyModelBucket(modelMap, session, dirtySet) {
     model.cost_known += 1;
     if (session.cost_source === 'exact') model.exact_priced += 1;
     if (session.cost_source === 'heuristic') model.heuristic_priced += 1;
-  }
-
-  const effortKey = normalizeEffortKey(session.reasoning_effort);
-  if (!model.by_effort[effortKey]) model.by_effort[effortKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
-  model.by_effort[effortKey].tokens += session.tokens_used || 0;
-  model.by_effort[effortKey].sessions += 1;
-  if (session.cost !== null) {
-    model.by_effort[effortKey].cost += session.cost;
-    if (session.cost_source === 'exact') model.by_effort[effortKey].exact_priced += 1;
-    if (session.cost_source === 'heuristic') model.by_effort[effortKey].heuristic_priced += 1;
   }
 
   dirtySet.add(key);
@@ -293,23 +261,11 @@ function addToDay(dayMap, dayKey, session, fraction) {
   if (!day.by_model[modelKey]) day.by_model[modelKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
   day.by_model[modelKey].tokens += (session.tokens_used || 0) * fraction;
   if (session.cost !== null) day.by_model[modelKey].cost += session.cost * fraction;
-
-  const familyKey = session.agent_family || 'generic';
-  if (!day.by_family[familyKey]) day.by_family[familyKey] = { tokens: 0, cost: 0, sessions: 0 };
-  day.by_family[familyKey].tokens += (session.tokens_used || 0) * fraction;
-  if (session.cost !== null) day.by_family[familyKey].cost += session.cost * fraction;
-  if (fraction > 0.001) day.by_family[familyKey].sessions += 1;
-
-  const repoKey = session.repo_label || 'unknown';
-  if (!day.by_repo[repoKey]) day.by_repo[repoKey] = { tokens: 0, cost: 0, sessions: 0 };
-  day.by_repo[repoKey].tokens += (session.tokens_used || 0) * fraction;
-  if (session.cost !== null) day.by_repo[repoKey].cost += session.cost * fraction;
-  if (fraction > 0.001) day.by_repo[repoKey].sessions += 1;
 }
 
 function ensureDay(dayMap, dayKey) {
   if (!dayMap.has(dayKey)) {
-    dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
+    dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {} });
   }
   return dayMap.get(dayKey);
 }
@@ -421,10 +377,6 @@ function deepRoundClone(source, numericKeys) {
   return out;
 }
 
-function deepClone(value) {
-  return value ? JSON.parse(JSON.stringify(value)) : value;
-}
-
 function serializeRepoSummary(value) {
   return {
     repo_key: value.repo_key,
@@ -470,10 +422,4 @@ function overlapsLowerBound(session, lowerBound) {
 function dayStartMs(dayKey) {
   const [y, m, d] = dayKey.split('-').map(Number);
   return new Date(y, m - 1, d).getTime();
-}
-
-function normalizeEffortKey(effort) {
-  if (!effort) return 'unknown';
-  const key = String(effort).toLowerCase().trim().replace(/-/g, '');
-  return key || 'unknown';
 }

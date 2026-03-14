@@ -24,3 +24,14 @@
   - reset ingest state
   - start a new run with a fresh `ingest_id`
   - broadcast a new SSE bootstrap so connected clients reset cleanly
+- New late-ingest performance findings:
+  - `server/ingest.js` still calls `assignRootThreadIds(sessions)` on the full session array after every enrichment batch, so root resolution cost grows with all sessions seen so far rather than just the current batch.
+  - `server/live-state.js` still maintains nested `by_model`, `by_family`, and `by_effort` structures for live repo/model buckets even though the current live transport only serializes summary rows for Overview.
+  - `server/live-state.js` live daily accumulation also keeps `by_family` and `by_repo`, but the live daily serializer only emits top-level metrics plus `by_model`.
+  - Live rankings patch serialization re-sorts whole repo/model/family maps for each dirty range via `serializeTopRange(...)`; this is cheaper than the full-session scans above, but it is still work that grows with cardinality later in ingest.
+  - The likely late-run slowdown is therefore dominated by cumulative bookkeeping, not by the fixed per-rollout JSONL parsing cost alone.
+- Optimization results from the current pass:
+  - Partial settled aggregate rebuilds during ingest were dead work once the non-Overview tabs were disabled; removing them is safe because settled REST data is only consumed after the final rebuild.
+  - Reducing full root-resolution passes from every batch to periodic refreshes plus one final exact pass preserves final correctness while removing the worst per-batch full-array walk.
+  - Live-state bookkeeping for ingest now only keeps the fields the live Overview transport actually serializes; nested live repo/model/daily breakdown objects were pure overhead.
+  - Real-data validation on `~/.codex` improved full ingest time from the earlier roughly `48s` class to `39.5s` for `4737` rollout-backed threads.

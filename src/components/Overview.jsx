@@ -123,7 +123,7 @@ function DailySpark({ daily, range }) {
     <div className="overview-daily-spark">
       <span className="overview-daily-spark-title">Daily Usage</span>
       <div className="overview-daily-spark-chart">
-        <ReactEChartsCore echarts={echarts} option={option} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
+        <ReactEChartsCore echarts={echarts} option={option} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
       </div>
     </div>
   );
@@ -379,7 +379,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Top Repos</div>
           {topRepos.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} />
+            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} notMerge={false} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -387,7 +387,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} />
+            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} notMerge={false} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -395,7 +395,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models</div>
           {topModels.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={modelOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} />
+            <ReactEChartsCore echarts={echarts} option={modelOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} notMerge={false} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}

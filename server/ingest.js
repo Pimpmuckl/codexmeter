@@ -129,8 +129,8 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.needs_enrichment = candidates.length;
     state.percent = candidates.length > 0 ? 0.08 : 0.90;
     const BATCH_SIZE = 25;
-    const PARTIAL_REBUILD_EVERY = opts.partialRebuildEvery || 250;
-    let lastPartialRebuildCount = 0;
+    const ROOT_REFRESH_EVERY = opts.rootRefreshEvery || 250;
+    let lastRootRefreshCount = 0;
 
     for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
       const batch = candidates.slice(i, i + BATCH_SIZE);
@@ -162,7 +162,14 @@ export async function runIngest(codexHome, state, opts = {}) {
         s.materialized = true;
       }
 
-      assignRootThreadIds(sessions);
+      const shouldRefreshRoots =
+        state.enriched === 0 ||
+        (state.enriched - lastRootRefreshCount) >= ROOT_REFRESH_EVERY;
+
+      if (shouldRefreshRoots) {
+        assignRootThreadIds(sessions);
+        lastRootRefreshCount = state.enriched;
+      }
       const livePatch = createEmptyLivePatch();
       for (const session of batch) {
         applySessionToLiveState(state.live_state, session, livePatch);
@@ -175,16 +182,6 @@ export async function runIngest(codexHome, state, opts = {}) {
         : 0.90;
       queueLiveProgress(state);
 
-      const shouldRebuildPartial =
-        state.enriched === batch.length ||
-        state.enriched === candidates.length ||
-        (state.enriched - lastPartialRebuildCount) >= PARTIAL_REBUILD_EVERY;
-
-      if (shouldRebuildPartial) {
-        assignRootThreadIds(sessions);
-        rebuildAggregates(sessions, state, opts, tz, { partial: true });
-        lastPartialRebuildCount = state.enriched;
-      }
       if (!isCurrentRun()) return;
     }
 

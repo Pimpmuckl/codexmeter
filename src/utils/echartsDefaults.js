@@ -1,7 +1,7 @@
 /** Shared ECharts animation defaults - faster than ECharts default (1000ms) */
 export const ECHARTS_ANIMATION = {
   animationDuration: 750,
-  animationDurationUpdate: 220,
+  animationDurationUpdate: 120,
   animationEasing: 'cubicOut',
   animationEasingUpdate: 'cubicOut',
 };
