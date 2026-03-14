@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useEffect, useRef } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
@@ -11,6 +11,7 @@ import {
   ECHARTS_OVERVIEW_BARS,
   ECHARTS_OVERVIEW_DONUTS,
   ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+  OVERVIEW_INGEST_ANIMATION,
   OVERVIEW_PRESENTATION_DURATION_MS,
 } from '../utils/animationsDefault';
 import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
@@ -126,8 +127,16 @@ const HEATMAP_METRICS = [
   { key: 'cost', label: 'Cost', fmt: fmtCost },
 ];
 
-function Heatmap({ heatmapData }) {
+const HEATMAP_POP_DURATION_MS = OVERVIEW_INGEST_ANIMATION.heatmap?.popDurationMs ?? 380;
+const HEATMAP_SETTLE_THRESHOLD = OVERVIEW_INGEST_ANIMATION.heatmap?.settleThreshold ?? 0.998;
+
+function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
   const [metric, setMetric] = useState('tokens');
+  const [changedKeysUp, setChangedKeysUp] = useState(new Set());
+  const [changedKeysDown, setChangedKeysDown] = useState(new Set());
+  const prevValuesRef = useRef({});
+  const prevMaxValRef = useRef(1);
+
   const data = heatmapData || {};
 
   const today = new Date();
@@ -144,6 +153,53 @@ function Heatmap({ heatmapData }) {
   }
 
   const maxVal = Math.max(...cells.map(c => c.val), 1);
+
+  useEffect(() => {
+    if (!isIngestActive || ingestProgress >= HEATMAP_SETTLE_THRESHOLD) {
+      prevValuesRef.current = {};
+      prevMaxValRef.current = 1;
+      return;
+    }
+    const today = new Date();
+    const prev = prevValuesRef.current;
+    const prevMaxVal = prevMaxValRef.current;
+    const up = new Set();
+    const down = new Set();
+    const tol = Math.max(0.5, prevMaxVal * 0.001);
+    const intensityDropThreshold = 0.02;
+    const intensityRiseThreshold = OVERVIEW_INGEST_ANIMATION.heatmap?.intensityRiseThreshold ?? 0.08;
+    for (let i = 364; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = d.toLocaleDateString('en-CA');
+      const val = data[key] ? data[key][metric] || 0 : 0;
+      const p = prev[key];
+      const pVal = p ?? 0;
+      const prevT = prevMaxVal > 0 ? pVal / prevMaxVal : 0;
+      const currT = maxVal > 0 ? val / maxVal : 0;
+      const isNewWinner = val >= maxVal - tol && maxVal > prevMaxVal + tol && pVal < maxVal - tol;
+      if (isNewWinner || val > pVal + tol) {
+        up.add(key);
+      } else if (currT > prevT + intensityRiseThreshold) {
+        up.add(key);
+      } else if (val < pVal - tol) {
+        down.add(key);
+      } else if (val > 0 && prevMaxVal > 0 && maxVal > prevMaxVal + tol) {
+        if (prevT >= 0.85 && currT < prevT - intensityDropThreshold) down.add(key);
+      }
+      prev[key] = val;
+    }
+    prevMaxValRef.current = maxVal;
+    if (up.size > 0 || down.size > 0) {
+      setChangedKeysUp(up);
+      setChangedKeysDown(down);
+      const t = setTimeout(() => {
+        setChangedKeysUp(new Set());
+        setChangedKeysDown(new Set());
+      }, HEATMAP_POP_DURATION_MS);
+      return () => clearTimeout(t);
+    }
+  }, [data, metric, isIngestActive, ingestProgress, maxVal]);
 
   function intensity(v) {
     if (v === 0) return 'var(--bg-elevated)';
@@ -175,7 +231,7 @@ function Heatmap({ heatmapData }) {
           c ? (
             <div
               key={c.key}
-              className={`heatmap-cell ${c.val > 0 ? 'active' : ''}`}
+              className={`heatmap-cell ${c.val > 0 ? 'active' : ''} ${changedKeysUp.has(c.key) ? 'heatmap-cell-pop' : ''} ${changedKeysDown.has(c.key) ? 'heatmap-cell-pop-dim' : ''}`}
               style={{ background: intensity(c.val) }}
               title={`${c.key}: ${HEATMAP_METRICS.find(m => m.key === metric).fmt(c.val)}`}
             />
@@ -359,7 +415,7 @@ function Overview({
         <DailySpark daily={presentation.daily} />
       </div>
 
-      <Heatmap heatmapData={presentation.heatmap} />
+      <Heatmap heatmapData={presentation.heatmap} isIngestActive={isIngestActive} ingestProgress={ingestProgress} />
 
       <div className="grid-3">
         <div className="chart-card">

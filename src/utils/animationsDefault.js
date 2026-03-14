@@ -59,6 +59,14 @@ export const OVERVIEW_INGEST_ANIMATION = {
     easingUpdate: 'linear',
     seriesAnimation: false,
   },
+  heatmap: {
+    /** Duration (ms) of the pop animation when a cell gets new data during ingest */
+    popDurationMs: 380,
+    /** Don't trigger pop when ingest progress is above this (avoids burst at settle) */
+    settleThreshold: 0.998,
+    /** Min relative intensity rise (0–1) to trigger pop – e.g. 0.08 = cell turning white */
+    intensityRiseThreshold: 0.08,
+  },
 };
 
 /** Shared ECharts animation defaults for non-Overview charts */
