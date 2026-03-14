@@ -6,6 +6,7 @@ import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
 import { buildLiveDataEnvelope, buildLiveStateFromSettled, mergeLiveEvent } from './live-state';
+import { useOverviewPresentation } from './hooks/useOverviewPresentation';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
@@ -267,14 +268,28 @@ export default function App() {
   }, [ingestFadeOut]);
 
   const liveData = useMemo(() => (
-    liveState ? buildLiveDataEnvelope(liveState, progress) : null
-  ), [liveState, progress]);
-  const overviewData = liveData ? liveData.overview : data.overview;
-  const overviewHeatmap = liveData ? liveData.heatmap : data.heatmap;
-  const overviewDaily = liveData ? liveData.daily : data.daily;
-  const overviewFamilies = liveData ? liveData.families : data.families;
-  const overviewRepos = liveData ? liveData.repos : data.repos;
-  const overviewModels = liveData ? liveData.models : data.models;
+    liveState ? buildLiveDataEnvelope(liveState) : null
+  ), [liveState]);
+  const overviewPresentationTarget = useMemo(() => (
+    liveData ? {
+      overview: liveData.overview,
+      heatmap: liveData.heatmap,
+      daily: liveData.daily,
+      families: liveData.families,
+      repos: liveData.repos,
+      models: liveData.models,
+    } : null
+  ), [liveData]);
+  const overviewPresentation = useOverviewPresentation(
+    overviewPresentationTarget,
+    { enabled: Boolean(liveData) && !complete }
+  );
+  const overviewData = overviewPresentation?.overview || (liveData ? liveData.overview : data.overview);
+  const overviewHeatmap = overviewPresentation?.heatmap || (liveData ? liveData.heatmap : data.heatmap);
+  const overviewDaily = overviewPresentation?.daily || (liveData ? liveData.daily : data.daily);
+  const overviewFamilies = overviewPresentation?.families || (liveData ? liveData.families : data.families);
+  const overviewRepos = overviewPresentation?.repos || (liveData ? liveData.repos : data.repos);
+  const overviewModels = overviewPresentation?.models || (liveData ? liveData.models : data.models);
 
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};

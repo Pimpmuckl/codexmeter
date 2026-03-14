@@ -6,6 +6,9 @@ export const ECHARTS_ANIMATION = {
   animationEasingUpdate: 'cubicOut',
 };
 
+export const OVERVIEW_PRESENTATION_INTERVAL_MS = 170;
+export const OVERVIEW_PRESENTATION_DURATION_MS = 190;
+
 /** Label animation - fade in after chart finishes, same duration and cubicOut easing */
 export const ECHARTS_LABEL_ANIMATION = {
   show: true,
@@ -44,10 +47,10 @@ export const ECHARTS_DETAIL_BAR_LABEL_ANIMATION = {
 
 /** Overview page - base animation config */
 export const ECHARTS_OVERVIEW_ANIMATION = {
-  animationDuration: 600,
-  animationDurationUpdate: 250,
-  animationEasing: 'cubicOut',
-  animationEasingUpdate: 'cubicOut',
+  animationDuration: 180,
+  animationDurationUpdate: 20,
+  animationEasing: 'linear',
+  animationEasingUpdate: 'linear',
 };
 
 /** Overview DailySpark - compact stacked bar */
@@ -63,9 +66,6 @@ export const ECHARTS_OVERVIEW_BARS = {
   //animationDuration: 550,
   //animationDurationUpdate: 170,
 };
-
-/** Count-up animation duration (ms) for Overview Top Repos bar labels - matches top bar stats */
-export const ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION = 400;
 
 /** Overview Work Type & Models - donut charts */
 export const ECHARTS_OVERVIEW_DONUTS = {

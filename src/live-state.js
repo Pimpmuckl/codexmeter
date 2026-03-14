@@ -53,42 +53,30 @@ function mergeRangeObjects(prevTarget, source, fallbackTarget) {
   return target;
 }
 
-export function buildLiveDataEnvelope(liveState, progress) {
+export function buildLiveDataEnvelope(liveState) {
   if (!liveState) return null;
 
   return {
     overview: {
       data: liveState.overview,
-      complete: progress?.complete || false,
       coverage: liveState.overview?.total?.coverage || { total: 0, enriched: 0, priced: 0, time_valid: 0 },
-      generated_at: progress?.generated_at || null,
     },
     repos: {
       data: liveState.repos,
-      complete: progress?.complete || false,
-      generated_at: progress?.generated_at || null,
     },
     models: {
       data: liveState.models,
-      complete: progress?.complete || false,
-      generated_at: progress?.generated_at || null,
     },
     families: {
       data: liveState.families,
-      complete: progress?.complete || false,
-      generated_at: progress?.generated_at || null,
     },
     daily: {
       data: Object.entries(liveState.daily)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([date, value]) => ({ date, ...value })),
-      complete: progress?.complete || false,
-      generated_at: progress?.generated_at || null,
     },
     heatmap: {
       data: liveState.heatmap,
-      complete: progress?.complete || false,
-      generated_at: progress?.generated_at || null,
     },
   };
 }

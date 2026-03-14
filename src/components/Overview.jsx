@@ -1,12 +1,12 @@
-import React, { useState, useMemo } from 'react';
-import { useCountUp, useCountUpValues } from '../hooks/useCountUp';
+import React, { useState } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor, getContrastLabelColor } from '../utils/colors';
-import { ECHARTS_LABEL_ANIMATION, ECHARTS_OVERVIEW_DAILY, ECHARTS_OVERVIEW_BARS, ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION, ECHARTS_OVERVIEW_DONUTS } from '../utils/echartsDefaults';
+import { ECHARTS_OVERVIEW_DAILY, ECHARTS_OVERVIEW_BARS, ECHARTS_OVERVIEW_DONUTS, OVERVIEW_PRESENTATION_DURATION_MS } from '../utils/echartsDefaults';
+import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
 
@@ -15,7 +15,7 @@ function fmt(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return n.toLocaleString();
+  return Math.round(n).toLocaleString();
 }
 
 function fmtCost(n) {
@@ -50,40 +50,8 @@ function wrapRepoLabel(label, maxLineLength = 16) {
   return lines.join('\n');
 }
 
-function getZoomSlice(range, dates) {
-  if (!dates?.length) return [];
-  if (range === 'd7') return dates.slice(-7);
-  if (range === 'd30') return dates.slice(-30);
-  return dates;
-}
-
-function DailySpark({ daily, range }) {
-  const dailyArr = Array.isArray(daily?.data) ? daily.data : (Array.isArray(daily) ? daily : []);
-  const sliced = useMemo(() => {
-    if (!dailyArr.length) return { dates: [], series: [] };
-    const dates = dailyArr.map((d) => d.date);
-    const visible = getZoomSlice(range, dates);
-    const set = new Set();
-    for (const d of dailyArr) {
-      for (const k of Object.keys(d.by_model || {})) set.add(k);
-    }
-    const groups = [...set];
-    const series = groups.map((g) => ({
-      name: g,
-      type: 'bar',
-      stack: 'total',
-      data: visible.map((date) => {
-        const d = dailyArr.find((x) => x.date === date);
-        const v = d?.by_model?.[g];
-        return v?.tokens || 0;
-      }),
-      itemStyle: { color: getModelColor(g) },
-      barMaxWidth: 12,
-    }));
-    return { dates: visible, series };
-  }, [dailyArr, range]);
-
-  if (!sliced.dates.length) {
+function DailySpark({ daily }) {
+  if (!daily?.dates?.length) {
     return (
       <div className="overview-daily-spark overview-daily-spark-empty">
         <span className="overview-daily-spark-title">Daily Usage</span>
@@ -114,16 +82,23 @@ function DailySpark({ daily, range }) {
       },
     },
     grid: { left: 4, right: 4, top: 4, bottom: 4 },
-    xAxis: { type: 'category', data: sliced.dates, show: false },
-    yAxis: { type: 'value', show: false, scale: true },
-    series: sliced.series,
+    xAxis: { type: 'category', data: daily.dates, show: false },
+    yAxis: { type: 'value', show: false, scale: false, min: 0 },
+    series: daily.series.map((series) => ({
+      name: series.label,
+      type: 'bar',
+      stack: 'total',
+      data: series.data,
+      itemStyle: { color: getModelColor(series.key) },
+      barMaxWidth: 12,
+    })),
   };
 
   return (
     <div className="overview-daily-spark">
       <span className="overview-daily-spark-title">Daily Usage</span>
       <div className="overview-daily-spark-chart">
-        <ReactEChartsCore echarts={echarts} option={option} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
+        <ReactEChartsCore echarts={echarts} option={option} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={false} notMerge={false} />
       </div>
     </div>
   );
@@ -137,8 +112,7 @@ const HEATMAP_METRICS = [
 
 function Heatmap({ heatmapData }) {
   const [metric, setMetric] = useState('tokens');
-  const data = heatmapData?.data;
-  if (!data || typeof data !== 'object') return null;
+  const data = heatmapData || {};
 
   const today = new Date();
   const cells = [];
@@ -199,48 +173,18 @@ function Heatmap({ heatmapData }) {
   );
 }
 
-const COUNT_DURATION = ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION;
-
 export default function Overview({ data, heatmap, daily, families, repos, models, range = 'total' }) {
-  const ov = data?.data;
-  const d = ov?.[range] || ov?.total || {};
-  const cov = d.coverage || {};
-  const threadRows = cov.thread_rows ?? cov.total ?? 0;
-  const rootSessions = cov.root_sessions ?? d.total_sessions ?? 0;
-
-  const dr = d.date_range;
-  const days = dr?.from != null && dr?.to != null ? Math.max(1, Math.ceil((dr.to - dr.from) / 86400)) : 1;
-  const exactPriced = cov.priced_exact ?? 0;
-  const fallbackPriced = cov.priced_fallback ?? 0;
-  const unpriced = cov.unpriced ?? Math.max(threadRows - (cov.priced ?? 0), 0);
-
-  const tokens = useCountUp(d.total_tokens ?? 0, COUNT_DURATION);
-  const elapsed = useCountUp(d.total_elapsed_seconds ?? 0, COUNT_DURATION);
-  const cost = useCountUp(d.total_cost ?? 0, COUNT_DURATION);
-  const sessions = useCountUp(rootSessions, COUNT_DURATION);
-  const enriched = useCountUp(cov.enriched ?? 0, COUNT_DURATION);
-  const priced = useCountUp(cov.priced ?? 0, COUNT_DURATION);
-  const exactPricedAnim = useCountUp(exactPriced, COUNT_DURATION);
-  const fallbackPricedAnim = useCountUp(fallbackPriced, COUNT_DURATION);
-  const unpricedAnim = useCountUp(unpriced, COUNT_DURATION);
-
-  const reposForRange = Array.isArray(repos?.data) ? repos.data : repos?.data?.[range] || repos?.data?.total || [];
-  const familiesForRange = Array.isArray(families?.data) ? families.data : families?.data?.[range] || families?.data?.total || [];
-  const modelsForRange = Array.isArray(models?.data) ? models.data : models?.data?.[range] || models?.data?.total || [];
-
-  const topRepos = reposForRange.slice(0, 6);
-  const topFamilies = familiesForRange;
-  const topModels = modelsForRange.slice(0, 6);
-
-  const animTokens = useCountUpValues(
-    topRepos.map((r) => r.tokens ?? 0),
-    ECHARTS_OVERVIEW_BARS_COUNT_UP_DURATION
+  const presentation = useAnimatedOverviewPresentation(
+    { overview: data, heatmap, daily, families, repos, models, range },
+    OVERVIEW_PRESENTATION_DURATION_MS
   );
 
-  if (!ov) return null;
+  if (!presentation.ready) return null;
 
-  const reversedRepos = [...topRepos].reverse();
-  const maxRepoTokens = Math.max(...topRepos.map(r => r.tokens || 0), 1);
+  const { stats, topRepos, topFamilies, topModels } = presentation;
+  const reversedRepos = [...topRepos.slice(0, 6)].reverse();
+  const maxRepoTokens = Math.max(...topRepos.slice(0, 6).map(row => row.tokens || 0), 1);
+
   const repoOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_BARS,
@@ -255,21 +199,22 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     xAxis: { type: 'value', show: false, max: maxRepoTokens || 1 },
     yAxis: {
       type: 'category',
-      data: reversedRepos.map(r => r.repo_label),
+      data: reversedRepos.map(row => row.label),
       axisLabel: {
         color: '#8b949e',
         fontSize: 11,
         formatter: (value) => wrapRepoLabel(value),
       },
-      axisTick: { show: false }, axisLine: { show: false },
+      axisTick: { show: false },
+      axisLine: { show: false },
     },
     series: [{
       type: 'bar',
-      data: reversedRepos.map(r => {
-        const val = r.tokens || 0;
+      data: reversedRepos.map((row) => {
+        const val = row.tokens || 0;
         const pct = val / maxRepoTokens;
         const inside = pct >= 0.25;
-        const barColor = getRepoColor(r.repo_label);
+        const barColor = getRepoColor(row.label);
         return {
           value: val,
           itemStyle: { color: barColor, borderRadius: [0, 3, 3, 0] },
@@ -278,13 +223,9 @@ export default function Overview({ data, heatmap, daily, families, repos, models
             position: inside ? 'insideRight' : 'right',
             distance: 5,
             offset: [0, 1.5],
-            formatter: (p) => {
-            const idx = reversedRepos.length - 1 - (p.dataIndex ?? 0);
-            return fmt(animTokens[Math.max(0, idx)] ?? 0);
-          },
+            formatter: () => fmt(val),
             color: inside ? getContrastLabelColor(barColor) : '#8b949e',
             fontSize: 10,
-            ...ECHARTS_LABEL_ANIMATION,
           },
         };
       }),
@@ -292,7 +233,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     }],
   };
 
-  const familyTotal = topFamilies.reduce((s, f) => s + (f.tokens || 0), 0);
+  const familyTotal = topFamilies.reduce((sum, row) => sum + (row.tokens || 0), 0);
   const familyOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
@@ -304,27 +245,27 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
-      ...ECHARTS_OVERVIEW_DONUTS,
+      animation: false,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
-      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}', ...ECHARTS_LABEL_ANIMATION },
+      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: topFamilies.map(f => {
-        const pct = familyTotal > 0 ? (f.tokens || 0) / familyTotal : 0;
+      data: topFamilies.map((row) => {
+        const pct = familyTotal > 0 ? (row.tokens || 0) / familyTotal : 0;
         const showLabel = pct >= 0.01;
         return {
-          name: f.family,
-          value: f.tokens,
-          itemStyle: { color: getFamilyColor(f.family) },
-          label: { show: showLabel, color: getFamilyColor(f.family) },
+          name: row.label,
+          value: row.tokens,
+          itemStyle: { color: getFamilyColor(row.key) },
+          label: { show: showLabel, color: getFamilyColor(row.key) },
           labelLine: { show: showLabel },
         };
       }),
     }],
   };
 
-  const modelTotal = topModels.reduce((s, m) => s + (m.tokens || 0), 0);
+  const modelTotal = topModels.slice(0, 6).reduce((sum, row) => sum + (row.tokens || 0), 0);
   const modelOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
@@ -336,20 +277,20 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
-      ...ECHARTS_OVERVIEW_DONUTS,
+      animation: false,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
-      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}', ...ECHARTS_LABEL_ANIMATION },
+      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: topModels.map(m => {
-        const pct = modelTotal > 0 ? (m.tokens || 0) / modelTotal : 0;
+      data: topModels.slice(0, 6).map((row) => {
+        const pct = modelTotal > 0 ? (row.tokens || 0) / modelTotal : 0;
         const showLabel = pct >= 0.01;
         return {
-          name: m.model_name,
-          value: m.tokens,
-          itemStyle: { color: getModelColor(m.model_name) },
-          label: { show: showLabel, color: getModelColor(m.model_name) },
+          name: row.label,
+          value: row.tokens,
+          itemStyle: { color: getModelColor(row.key) },
+          label: { show: showLabel, color: getModelColor(row.key) },
           labelLine: { show: showLabel },
         };
       }),
@@ -362,35 +303,35 @@ export default function Overview({ data, heatmap, daily, families, repos, models
         <div className="stat-cards">
           <div className="stat-card">
             <div className="stat-label">Tokens</div>
-            <div className="stat-value">{fmt(tokens)}</div>
-            <div className="stat-per-day"><span className="stat-per-day-value">{fmt(tokens / days)}</span> per day</div>
+            <div className="stat-value">{fmt(stats.tokens)}</div>
+            <div className="stat-per-day"><span className="stat-per-day-value">{fmt(stats.tokens / stats.days)}</span> per day</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Agent Time</div>
-            <div className="stat-value">{fmtHours(elapsed)}</div>
-            <div className="stat-per-day"><span className="stat-per-day-value">{fmtHours(elapsed / days)}</span> per day</div>
+            <div className="stat-value">{fmtHours(stats.elapsed)}</div>
+            <div className="stat-per-day"><span className="stat-per-day-value">{fmtHours(stats.elapsed / stats.days)}</span> per day</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Est. API Cost</div>
-            <div className="stat-value">{fmtCost(cost)}</div>
-            <div className="stat-per-day"><span className="stat-per-day-value">{fmtCost(cost / days)}</span> per day</div>
+            <div className="stat-value">{fmtCost(stats.cost)}</div>
+            <div className="stat-per-day"><span className="stat-per-day-value">{fmtCost(stats.cost / stats.days)}</span> per day</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Sessions</div>
-            <div className="stat-value">{Math.round(sessions).toLocaleString()}</div>
-            <div className="stat-per-day"><span className="stat-per-day-value">{(sessions / days).toFixed(1)}</span> per day</div>
+            <div className="stat-value">{Math.round(stats.sessions).toLocaleString()}</div>
+            <div className="stat-per-day"><span className="stat-per-day-value">{(stats.sessions / stats.days).toFixed(1)}</span> per day</div>
           </div>
         </div>
-        <DailySpark daily={daily} range={range} />
+        <DailySpark daily={presentation.daily} />
       </div>
 
-      <Heatmap heatmapData={heatmap} />
+      <Heatmap heatmapData={presentation.heatmap} />
 
       <div className="grid-3">
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Top Repos</div>
           {topRepos.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} notMerge={false} />
+            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={false} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -398,7 +339,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} notMerge={false} />
+            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={true} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -406,7 +347,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models</div>
           {topModels.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={modelOption} style={{ height: 180 }} theme="dark" lazyUpdate={true} notMerge={false} />
+            <ReactEChartsCore echarts={echarts} option={modelOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={true} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -417,17 +358,17 @@ export default function Overview({ data, heatmap, daily, families, repos, models
         <span style={{ fontWeight: 500 }}>Session coverage:</span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: '#22c55e' }} />
-          <span className="coverage-nums">{Math.round(exactPricedAnim)}</span>
+          <span className="coverage-nums">{Math.round(stats.exactPriced)}</span>
           {' '}exact-priced
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: '#c084fc' }} />
-          <span className="coverage-nums">{Math.round(fallbackPricedAnim)}</span>
+          <span className="coverage-nums">{Math.round(stats.fallbackPriced)}</span>
           {' '}fallback-priced
         </span>
         <span className="coverage-item">
           <span className="coverage-dot" style={{ background: '#64748b' }} />
-          <span className="coverage-nums">{Math.round(unpricedAnim)}</span>
+          <span className="coverage-nums">{Math.round(stats.unpriced)}</span>
           {' '}unpriced
         </span>
       </div>
