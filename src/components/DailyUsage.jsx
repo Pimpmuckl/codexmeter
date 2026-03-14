@@ -5,16 +5,14 @@ import { BarChart, LineChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, GraphicComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor, getFamilyColor, getRepoColor, getContrastLabelColor } from '../utils/colors';
+import { formatCompactNumber } from '../utils/formatters';
 import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/animationsDefault';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, GraphicComponent, CanvasRenderer]);
 
 function fmt(n) {
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return Math.round(n).toLocaleString();
+  return formatCompactNumber(n);
 }
 function fmtCost(n) { return n == null || n === 0 ? '$0' : '$' + n.toFixed(2); }
 function fmtHours(sec) { return !sec ? '0h' : (sec / 3600).toFixed(1) + 'h'; }
@@ -46,6 +44,22 @@ function getZoomStart(range, count) {
   if (range === 'd7') return Math.max(0, 100 - (7 / count) * 100);
   if (range === 'd30') return Math.max(0, 100 - (30 / count) * 100);
   return 0;
+}
+
+function getVisibleBarWidth(range, count) {
+  if (range === 'd7') return 44;
+  if (range === 'd30') return 22;
+  if (count <= 14) return 36;
+  if (count <= 31) return 18;
+  return 14;
+}
+
+function getVisibleBarPercent(range, count) {
+  if (range === 'd7') return '72%';
+  if (range === 'd30') return '54%';
+  if (count <= 14) return '64%';
+  if (count <= 31) return '48%';
+  return '36%';
 }
 
 /** Find the largest rectangle that fits in the band (histogram), return center [x, y] */
@@ -84,9 +98,10 @@ function largestRectInBand(heights, prevStack) {
 function DayDetail({ day, chartMode }) {
   const modelRows = useMemo(() => buildBreakdownRows(day.by_model), [day.by_model]);
   const repoRows = useMemo(() => buildBreakdownRows(day.by_repo), [day.by_repo]);
+  const workRows = useMemo(() => buildBreakdownRows(day.by_family), [day.by_family]);
 
   const modelOption = buildDistributionOption({
-    title: 'Models for day',
+    title: 'Models',
     rows: modelRows,
     valueKey: 'tokens',
     colorForKey: getModelColor,
@@ -97,10 +112,21 @@ function DayDetail({ day, chartMode }) {
   });
 
   const repoOption = buildDistributionOption({
-    title: 'Repos for day',
+    title: 'Repos',
     rows: repoRows,
     valueKey: 'tokens',
     colorForKey: getRepoColor,
+    valueFormatter: fmt,
+    chartMode,
+    defaultMode: 'donut',
+    renderTitleInChart: false,
+  });
+
+  const workOption = buildDistributionOption({
+    title: 'Work Type',
+    rows: workRows,
+    valueKey: 'tokens',
+    colorForKey: getFamilyColor,
     valueFormatter: fmt,
     chartMode,
     defaultMode: 'donut',
@@ -111,35 +137,51 @@ function DayDetail({ day, chartMode }) {
     <div className="model-detail-wrap">
       <div className="model-detail-charts">
         <div className="model-detail-donut">
-          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Repos for day</div>
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Repos</div>
           <ReactEChartsCore echarts={echarts} option={repoOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
         </div>
         <div className="model-detail-donut">
-          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models for day</div>
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models</div>
           <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
+        </div>
+        <div className="model-detail-donut">
+          <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
+          <ReactEChartsCore echarts={echarts} option={workOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
         </div>
       </div>
     </div>
   );
 }
 
-export default function DailyUsage({ data, range = 'total', chartMode = 'default' }) {
-  const [metric, setMetric] = useState('tokens');
-  const [split, setSplit] = useState('model');
-  const [displayMode, setDisplayMode] = useState('absolute');
-  const [selectedDate, setSelectedDate] = useState(null);
+const DailyMainChart = React.memo(function DailyMainChart({
+  daily,
+  range,
+  metric,
+  split,
+  displayMode,
+  onSelectDate,
+}) {
+  const [zoomWindow, setZoomWindow] = useState({ start: 0, end: 100 });
   const chartRef = useRef(null);
-
-  if (!data?.data?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
-
-  const daily = data.data;
   const dates = daily.map((d) => d.date);
   const curMetric = METRICS.find((m) => m.key === metric);
   const zoomStart = useMemo(() => getZoomStart(range, dates.length), [range, dates.length]);
 
   useEffect(() => {
-    if (!selectedDate && daily[0]) setSelectedDate(daily[daily.length - 1]?.date || daily[0]?.date);
-  }, [daily, selectedDate]);
+    setZoomWindow({ start: zoomStart, end: 100 });
+  }, [zoomStart]);
+
+  const visibleDateCount = useMemo(() => {
+    if (!dates.length) return 0;
+    const startPct = Math.max(0, Math.min(100, zoomWindow.start ?? zoomStart));
+    const endPct = Math.max(startPct, Math.min(100, zoomWindow.end ?? 100));
+    const startIdx = Math.max(0, Math.floor((startPct / 100) * dates.length));
+    const endIdx = Math.min(dates.length - 1, Math.ceil((endPct / 100) * dates.length) - 1);
+    return Math.max(1, endIdx - startIdx + 1);
+  }, [dates.length, zoomWindow, zoomStart]);
+
+  const visibleBarWidth = useMemo(() => getVisibleBarWidth(range, visibleDateCount), [range, visibleDateCount]);
+  const visibleBarPercent = useMemo(() => getVisibleBarPercent(range, visibleDateCount), [range, visibleDateCount]);
 
   const groups = useMemo(() => {
     const set = new Set();
@@ -169,6 +211,7 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
     }
     return sum;
   }), [daily, rawSeriesData]);
+  const maxDayTotal = useMemo(() => Math.max(...dayTotals, 0), [dayTotals]);
 
   const isRelative = displayMode === 'relative';
   let cumulativeData = null;
@@ -223,7 +266,9 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
       stack: 'total',
       data,
       itemStyle: { color },
-      barMaxWidth: 14,
+      barWidth: visibleBarPercent,
+      barMaxWidth: visibleBarWidth,
+      barMinWidth: Math.min(10, visibleBarWidth),
     };
   });
 
@@ -303,7 +348,9 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
         }
         const displayTotal = displayMode === 'relative' && total === 0 ? (dayTotals[prevIdx] ?? 0) : total;
         let html = `<b>${params[0].axisValue}</b><br/>`;
-        const sorted = [...params].filter((p) => p.value > 0).sort((a, b) => (b.value || 0) - (a.value || 0));
+        const sorted = [...params]
+          .filter((p) => p.seriesName !== '__day_click_overlay__' && p.value > 0)
+          .sort((a, b) => (b.value || 0) - (a.value || 0));
         for (const p of sorted) {
           const rawVal = displayMode === 'relative'
             ? (rawSeriesData.find((s) => s.name === p.seriesName)?.values[prevIdx] ?? 0)
@@ -324,8 +371,8 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
     grid: { left: 70, right: 20, top: 35, bottom: 55 },
     dataZoom: [{
       type: 'slider',
-      start: zoomStart,
-      end: 100,
+      start: zoomWindow.start,
+      end: zoomWindow.end,
       borderColor: '#30363d',
       fillerColor: 'rgba(99, 102, 241, 0.08)',
       handleStyle: { color: '#6366f1' },
@@ -342,9 +389,76 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
       },
       splitLine: { lineStyle: { color: '#21262d' } },
     },
-    series,
+    series: [
+      ...series,
+      {
+        name: '__day_click_overlay__',
+        type: 'bar',
+        data: dayTotals.map(() => (displayMode === 'relative' ? 100 : maxDayTotal)),
+        barWidth: '96%',
+        barGap: '-100%',
+        itemStyle: { color: 'rgba(0,0,0,0)' },
+        emphasis: { disabled: true },
+        tooltip: { show: false },
+        z: 100,
+        animation: false,
+      },
+    ],
     ...ECHARTS_ANIMATION,
   };
+
+  return (
+    <div className="chart-card">
+      <button className="export-btn" onClick={() => exportChart(chartRef)}>PNG</button>
+      <ReactEChartsCore
+        ref={chartRef}
+        echarts={echarts}
+        option={option}
+        style={{ height: 400 }}
+        theme="dark"
+        notMerge={false}
+        replaceMerge={['series', 'legend', 'graphic']}
+        lazyUpdate={true}
+        onChartReady={updateGraphicLabels}
+        onEvents={{
+          click: (params) => {
+            const date = params?.axisValue || params?.name;
+            if (date) onSelectDate(date);
+          },
+          datazoom: () => {
+            const chart = chartRef.current?.getEchartsInstance();
+            const dz = chart?.getOption()?.dataZoom?.[0];
+            if (dz) {
+              setZoomWindow({
+                start: typeof dz.start === 'number' ? dz.start : zoomStart,
+                end: typeof dz.end === 'number' ? dz.end : 100,
+              });
+            }
+            requestAnimationFrame(() => updateGraphicLabels());
+          },
+        }}
+      />
+    </div>
+  );
+});
+
+export default function DailyUsage({ data, range = 'total', chartMode = 'default' }) {
+  const [metric, setMetric] = useState('tokens');
+  const [split, setSplit] = useState('model');
+  const [displayMode, setDisplayMode] = useState('absolute');
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  if (!data?.data?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
+
+  const daily = data.data;
+
+  useEffect(() => {
+    if (!selectedDate && daily[0]) setSelectedDate(daily[daily.length - 1]?.date || daily[0]?.date);
+  }, [daily, selectedDate]);
+
+  const handleSelectDate = useCallback((date) => {
+    if (date) setSelectedDate(date);
+  }, []);
 
   const selectedDay = daily.find((d) => d.date === selectedDate) || null;
 
@@ -367,29 +481,14 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
         </div>
       </div>
 
-      <div className="chart-card">
-        <button className="export-btn" onClick={() => exportChart(chartRef)}>PNG</button>
-        <ReactEChartsCore
-          ref={chartRef}
-          echarts={echarts}
-          option={option}
-          style={{ height: 400 }}
-          theme="dark"
-          notMerge={false}
-          replaceMerge={['series', 'legend', 'graphic']}
-          lazyUpdate={true}
-          onChartReady={updateGraphicLabels}
-          onEvents={{
-            click: (params) => {
-              const date = params?.axisValue || params?.name;
-              if (date) setSelectedDate(date);
-            },
-            datazoom: () => {
-              requestAnimationFrame(() => updateGraphicLabels());
-            },
-          }}
-        />
-      </div>
+      <DailyMainChart
+        daily={daily}
+        range={range}
+        metric={metric}
+        split={split}
+        displayMode={displayMode}
+        onSelectDate={handleSelectDate}
+      />
 
       {selectedDay && (
         <div className="chart-card">

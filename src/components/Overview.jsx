@@ -5,6 +5,7 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor, getContrastLabelColor } from '../utils/colors';
+import { formatCompactNumber } from '../utils/formatters';
 import {
   ECHARTS_OVERVIEW_DAILY,
   ECHARTS_OVERVIEW_BARS,
@@ -17,11 +18,7 @@ import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPre
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
 
 function fmt(n) {
-  if (n == null) return '—';
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return Math.round(n).toLocaleString();
+  return formatCompactNumber(n);
 }
 
 function fmtCost(n) {
@@ -56,6 +53,16 @@ function wrapRepoLabel(label, maxLineLength = 16) {
   return lines.join('\n');
 }
 
+function getOverviewDailyBarSizing(count) {
+  if (count <= 7) {
+    return { barWidth: '72%', barMaxWidth: 28 };
+  }
+  if (count <= 30) {
+    return { barWidth: '54%', barMaxWidth: 18 };
+  }
+  return { barWidth: null, barMaxWidth: 12 };
+}
+
 function DailySpark({ daily }) {
   if (!daily?.dates?.length) {
     return (
@@ -65,6 +72,8 @@ function DailySpark({ daily }) {
       </div>
     );
   }
+
+  const { barWidth, barMaxWidth } = getOverviewDailyBarSizing(daily.dates.length);
 
   const option = {
     backgroundColor: 'transparent',
@@ -96,7 +105,8 @@ function DailySpark({ daily }) {
       stack: 'total',
       data: series.data,
       itemStyle: { color: getModelColor(series.key) },
-      barMaxWidth: 12,
+      ...(barWidth ? { barWidth } : {}),
+      barMaxWidth,
     })),
   };
 
