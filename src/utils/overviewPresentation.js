@@ -130,7 +130,18 @@ export function buildOverviewPresentationTarget({ overview, heatmap, daily, fami
 function interpolateMetricRows(fromRows, toRows, t) {
   const fromMap = new Map((fromRows || []).map((row) => [row.key, row]));
   const toMap = new Map((toRows || []).map((row) => [row.key, row]));
-  const keys = new Set([...fromMap.keys(), ...toMap.keys()]);
+  const keys = [];
+  const seen = new Set();
+  for (const row of toRows || []) {
+    if (seen.has(row.key)) continue;
+    seen.add(row.key);
+    keys.push(row.key);
+  }
+  for (const row of fromRows || []) {
+    if (seen.has(row.key)) continue;
+    seen.add(row.key);
+    keys.push(row.key);
+  }
   const rows = [];
 
   for (const key of keys) {
@@ -142,7 +153,6 @@ function interpolateMetricRows(fromRows, toRows, t) {
     rows.push({ key, label, tokens });
   }
 
-  rows.sort((a, b) => b.tokens - a.tokens || a.label.localeCompare(b.label));
   return rows;
 }
 

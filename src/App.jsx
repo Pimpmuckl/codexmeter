@@ -5,8 +5,7 @@ import Repos from './components/Repos';
 import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
-import { buildLiveDataEnvelope, buildLiveStateFromSettled, mergeLiveEvent } from './live-state';
-import { useOverviewPresentation } from './hooks/useOverviewPresentation';
+import { buildLiveDataEnvelope, mergeLiveEvent } from './live-state';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
@@ -43,6 +42,7 @@ export default function App() {
   const [ingestFadeOut, setIngestFadeOut] = useState(false);
   const [ingestFadeDone, setIngestFadeDone] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [overviewPresentationSettled, setOverviewPresentationSettled] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -123,15 +123,7 @@ export default function App() {
     const ensureSettledDataLoaded = async (nextProgress, ingestId = null) => {
       if (!alive || !nextProgress?.complete || settledFetchStarted) return;
       settledFetchStarted = true;
-      const settledData = await fetchAll();
-      if (!alive || !settledData) return;
-      const hydratedLiveState = buildLiveStateFromSettled(
-        settledData,
-        liveStateRef?.ingest_id || ingestId || null,
-        liveStateRef?.seq || 0
-      );
-      liveStateRef = hydratedLiveState;
-      setLiveState(hydratedLiveState);
+      await fetchAll();
     };
 
     const startFallbackPolling = () => {
@@ -251,8 +243,14 @@ export default function App() {
     }
   }, [progress, showOverlay, fadingOut]);
 
-  const complete = progress?.complete;
+  const complete = Boolean(progress?.complete && overviewPresentationSettled);
   const pct = Math.round((progress?.percent || 0) * 100);
+
+  useEffect(() => {
+    if (!progress?.complete) {
+      setOverviewPresentationSettled(false);
+    }
+  }, [progress?.complete]);
 
   useEffect(() => {
     if (complete && !ingestFadeOut) setIngestFadeOut(true);
@@ -270,26 +268,12 @@ export default function App() {
   const liveData = useMemo(() => (
     liveState ? buildLiveDataEnvelope(liveState) : null
   ), [liveState]);
-  const overviewPresentationTarget = useMemo(() => (
-    liveData ? {
-      overview: liveData.overview,
-      heatmap: liveData.heatmap,
-      daily: liveData.daily,
-      families: liveData.families,
-      repos: liveData.repos,
-      models: liveData.models,
-    } : null
-  ), [liveData]);
-  const overviewPresentation = useOverviewPresentation(
-    overviewPresentationTarget,
-    { enabled: Boolean(liveData) && !complete }
-  );
-  const overviewData = overviewPresentation?.overview || (liveData ? liveData.overview : data.overview);
-  const overviewHeatmap = overviewPresentation?.heatmap || (liveData ? liveData.heatmap : data.heatmap);
-  const overviewDaily = overviewPresentation?.daily || (liveData ? liveData.daily : data.daily);
-  const overviewFamilies = overviewPresentation?.families || (liveData ? liveData.families : data.families);
-  const overviewRepos = overviewPresentation?.repos || (liveData ? liveData.repos : data.repos);
-  const overviewModels = overviewPresentation?.models || (liveData ? liveData.models : data.models);
+  const overviewData = liveData ? liveData.overview : data.overview;
+  const overviewHeatmap = liveData ? liveData.heatmap : data.heatmap;
+  const overviewDaily = liveData ? liveData.daily : data.daily;
+  const overviewFamilies = liveData ? liveData.families : data.families;
+  const overviewRepos = liveData ? liveData.repos : data.repos;
+  const overviewModels = liveData ? liveData.models : data.models;
 
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
@@ -371,7 +355,7 @@ export default function App() {
         </nav>
 
         <div className="main-content">
-          {tab === 'Overview' && <Overview data={overviewData} heatmap={overviewHeatmap} daily={overviewDaily} families={overviewFamilies} repos={overviewRepos} models={overviewModels} range={range} />}
+          {tab === 'Overview' && <Overview data={overviewData} heatmap={overviewHeatmap} daily={overviewDaily} families={overviewFamilies} repos={overviewRepos} models={overviewModels} range={range} onPresentationSettledChange={setOverviewPresentationSettled} />}
           {tab === 'Repos' && <Repos data={data.repos} />}
           {tab === 'Models' && <Models data={data.models} />}
           {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}

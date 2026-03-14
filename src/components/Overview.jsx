@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor, getContrastLabelColor } from '../utils/colors';
-import { ECHARTS_OVERVIEW_DAILY, ECHARTS_OVERVIEW_BARS, ECHARTS_OVERVIEW_DONUTS, OVERVIEW_PRESENTATION_DURATION_MS } from '../utils/echartsDefaults';
+import {
+  ECHARTS_OVERVIEW_DAILY,
+  ECHARTS_OVERVIEW_BARS,
+  ECHARTS_OVERVIEW_DONUTS,
+  ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+  OVERVIEW_PRESENTATION_DURATION_MS,
+} from '../utils/echartsDefaults';
 import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
@@ -173,10 +179,11 @@ function Heatmap({ heatmapData }) {
   );
 }
 
-export default function Overview({ data, heatmap, daily, families, repos, models, range = 'total' }) {
+function Overview({ data, heatmap, daily, families, repos, models, range = 'total', onPresentationSettledChange = null }) {
   const presentation = useAnimatedOverviewPresentation(
     { overview: data, heatmap, daily, families, repos, models, range },
-    OVERVIEW_PRESENTATION_DURATION_MS
+    OVERVIEW_PRESENTATION_DURATION_MS,
+    onPresentationSettledChange
   );
 
   if (!presentation.ready) return null;
@@ -245,7 +252,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
-      animation: false,
+      animation: ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
@@ -277,7 +284,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
-      animation: false,
+      animation: ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
@@ -375,3 +382,16 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     </div>
   );
 }
+
+function areOverviewPropsEqual(prev, next) {
+  return prev.data === next.data
+    && prev.heatmap === next.heatmap
+    && prev.daily === next.daily
+    && prev.families === next.families
+    && prev.repos === next.repos
+    && prev.models === next.models
+    && prev.range === next.range
+    && prev.onPresentationSettledChange === next.onPresentationSettledChange;
+}
+
+export default memo(Overview, areOverviewPropsEqual);

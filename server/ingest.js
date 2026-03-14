@@ -12,14 +12,8 @@ import { createRolloutWorkerPool } from './rollout-worker-pool.js';
 
 const LIVE_FRAME_INTERVAL_MS = 50;
 const LIVE_DAYS_PER_SECOND = 6;
-const LIVE_DAY_CADENCE_MS = Math.round(1000 / LIVE_DAYS_PER_SECOND);
+const LIVE_OVERVIEW_CADENCE_MS = Math.round(1000 / 10);
 const LIVE_DAY_KEYS_PER_EMIT = 1;
-const LIVE_SURFACE_CADENCE_MS = {
-  overview: LIVE_FRAME_INTERVAL_MS * 2,
-  rankings: LIVE_FRAME_INTERVAL_MS * 2,
-  daily: LIVE_DAY_CADENCE_MS,
-  heatmap: LIVE_DAY_CADENCE_MS,
-};
 
 export function createIngestState() {
   return {
@@ -45,7 +39,7 @@ export function createIngestState() {
     live_pending_patch: createEmptyLivePatch(),
     live_progress_dirty: false,
     live_last_emit_at: 0,
-    live_last_surface_emit_at: { overview: 0, rankings: 0, daily: 0, heatmap: 0 },
+    live_last_overview_emit_at: 0,
   };
 }
 
@@ -134,7 +128,7 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     state.needs_enrichment = candidates.length;
     state.percent = candidates.length > 0 ? 0.08 : 0.90;
-    const BATCH_SIZE = opts.batchSize || 100;
+    const BATCH_SIZE = opts.batchSize || 40;
     const ROOT_REFRESH_EVERY = opts.rootRefreshEvery || 1000;
     let lastRootRefreshCount = 0;
 
@@ -255,7 +249,7 @@ export function restartIngest(codexHome, state, opts = {}) {
   state.live_pending_patch = createEmptyLivePatch();
   state.live_progress_dirty = false;
   state.live_last_emit_at = 0;
-  state.live_last_surface_emit_at = { overview: 0, rankings: 0, daily: 0, heatmap: 0 };
+  state.live_last_overview_emit_at = 0;
 
   return runIngest(codexHome, state, opts);
 }
@@ -496,41 +490,36 @@ function takeFlushablePatch(state) {
   const now = Date.now();
   const sent = createEmptyLivePatch();
 
-  if (state.live_pending_patch.overview.size > 0 && readyForSurface(state, 'overview', now)) {
-    moveSet(state.live_pending_patch.overview, sent.overview);
-    state.live_last_surface_emit_at.overview = now;
-  }
-
-  const rankingsDirty =
+  const overviewDirty =
+    state.live_pending_patch.overview.size > 0 ||
     state.live_pending_patch.repos.total.size > 0 || state.live_pending_patch.repos.d7.size > 0 || state.live_pending_patch.repos.d30.size > 0 ||
     state.live_pending_patch.models.total.size > 0 || state.live_pending_patch.models.d7.size > 0 || state.live_pending_patch.models.d30.size > 0 ||
-    state.live_pending_patch.families.total.size > 0 || state.live_pending_patch.families.d7.size > 0 || state.live_pending_patch.families.d30.size > 0;
+    state.live_pending_patch.families.total.size > 0 || state.live_pending_patch.families.d7.size > 0 || state.live_pending_patch.families.d30.size > 0 ||
+    state.live_pending_patch.daily.size > 0 || state.live_pending_patch.heatmap.size > 0;
 
-  if (rankingsDirty && readyForSurface(state, 'rankings', now)) {
-    moveRangeSets(state.live_pending_patch.repos, sent.repos);
-    moveRangeSets(state.live_pending_patch.models, sent.models);
-    moveRangeSets(state.live_pending_patch.families, sent.families);
-    state.live_last_surface_emit_at.rankings = now;
+  if (!overviewDirty || !readyForOverview(state, now)) {
+    return sent;
   }
 
-  const dayDirty = state.live_pending_patch.daily.size > 0 || state.live_pending_patch.heatmap.size > 0;
-  if (dayDirty && readyForSurface(state, 'daily', now)) {
-    const nextDayKeys = takeNextChronologicalDayKeys(
-      state.live_pending_patch.daily,
-      state.live_pending_patch.heatmap,
-      LIVE_DAY_KEYS_PER_EMIT
-    );
-    moveSpecificKeys(state.live_pending_patch.daily, sent.daily, nextDayKeys);
-    moveSpecificKeys(state.live_pending_patch.heatmap, sent.heatmap, nextDayKeys);
-    state.live_last_surface_emit_at.daily = now;
-    state.live_last_surface_emit_at.heatmap = now;
-  }
+  moveSet(state.live_pending_patch.overview, sent.overview);
+  moveRangeSets(state.live_pending_patch.repos, sent.repos);
+  moveRangeSets(state.live_pending_patch.models, sent.models);
+  moveRangeSets(state.live_pending_patch.families, sent.families);
+
+  const nextDayKeys = takeNextChronologicalDayKeys(
+    state.live_pending_patch.daily,
+    state.live_pending_patch.heatmap,
+    LIVE_DAY_KEYS_PER_EMIT
+  );
+  moveSpecificKeys(state.live_pending_patch.daily, sent.daily, nextDayKeys);
+  moveSpecificKeys(state.live_pending_patch.heatmap, sent.heatmap, nextDayKeys);
+  state.live_last_overview_emit_at = now;
 
   return sent;
 }
 
-function readyForSurface(state, surfaceKey, now) {
-  return (now - state.live_last_surface_emit_at[surfaceKey]) >= LIVE_SURFACE_CADENCE_MS[surfaceKey];
+function readyForOverview(state, now) {
+  return (now - state.live_last_overview_emit_at) >= LIVE_OVERVIEW_CADENCE_MS;
 }
 
 function moveSet(from, to) {
