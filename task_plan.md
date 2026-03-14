@@ -21,18 +21,27 @@ Optimize ingest throughput aggressively, with emphasis on the late-ingest slowdo
 3. Validate on real `.codex` data
    - Re-run ingest/build validations.
    - Compare later-batch behavior against current baseline qualitatively and with targeted timing evidence.
-4. Review and checkpoint
+4. Worker-thread rollout enrichment
+   - Keep main-thread ingest orchestration/live SSE state unchanged.
+   - Move rollout enrichment into a bounded worker pool with a tiny job/result contract.
+   - Preserve final aggregate semantics and rerun safety.
+5. Review and checkpoint
    - Run review on the optimization pass.
-   - Leave the codebase in a clean, testable state before any worker-thread follow-up.
+   - Leave the codebase in a clean, testable state.
+6. Final tuning and exit
+   - Benchmark pool-size/batch-size/root-refresh combinations.
+   - Lock the best proven defaults instead of leaving guessed values.
 
 ## Risks / Watchpoints
 - Incremental root tracking must remain correct when parent threads appear later in ingest order.
 - Live-state slimming must not break final settled REST aggregates or the Overview live surface.
 - The existing uncommitted tweak in `src/utils/echartsDefaults.js` is not part of this optimization pass unless needed.
-- If the real bottleneck is rollout parsing itself, we should stop after proving that and move to worker threads separately.
+- Worker pool lifecycle must stay scoped to `runIngest(...)` so reruns cannot leak stale results.
+- The worker contract should stay tiny: `rolloutPath` + `timezone` in, compact enrichment payload out.
 
 ## Exit Criteria
 - Later ingest batches no longer degrade sharply from cumulative bookkeeping work.
 - Live SSE remains functional and Overview still updates during ingest.
 - Final post-ingest data matches the settled aggregate behavior.
-- `npm run build` passes and the optimization is ready for a worker-thread follow-up, not entangled with it.
+- `npm run build` passes and the worker-thread enrichment path clearly improves ingest throughput.
+- No remaining obvious backend-only optimization idea is left unmeasured or untried.

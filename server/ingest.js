@@ -1,5 +1,4 @@
 import { readThreads } from './sqlite-reader.js';
-import { enrichFromRollout } from './rollout-reader.js';
 import { randomUUID } from 'crypto';
 import {
   normalizeCwd, deriveRepoKey, deriveRepoLabel,
@@ -9,8 +8,9 @@ import { initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
 import { createDayKeyFormatter } from './day-key.js';
 import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap, buildLivePatch } from './live-state.js';
+import { createRolloutWorkerPool } from './rollout-worker-pool.js';
 
-const LIVE_FRAME_INTERVAL_MS = 17;
+const LIVE_FRAME_INTERVAL_MS = 50;
 const LIVE_SURFACE_CADENCE_MS = {
   overview: LIVE_FRAME_INTERVAL_MS,
   rankings: LIVE_FRAME_INTERVAL_MS * 2,
@@ -37,7 +37,6 @@ export function createIngestState() {
     live_state: null,
     live_seq: 0,
     live_subscribers: new Set(),
-    live_flush_timer: null,
     live_pump_timer: null,
     live_pending_patch: createEmptyLivePatch(),
     live_progress_dirty: false,
@@ -51,6 +50,7 @@ export async function runIngest(codexHome, state, opts = {}) {
   const toDayKey = createDayKeyFormatter(tz);
   const runToken = state.run_token;
   const isCurrentRun = () => state.run_token === runToken;
+  const workerPool = createRolloutWorkerPool({ size: opts.workerThreads });
 
   try {
     state.live_state = createLiveAggregateState(tz);
@@ -128,8 +128,8 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     state.needs_enrichment = candidates.length;
     state.percent = candidates.length > 0 ? 0.08 : 0.90;
-    const BATCH_SIZE = 25;
-    const ROOT_REFRESH_EVERY = opts.rootRefreshEvery || 250;
+    const BATCH_SIZE = opts.batchSize || 100;
+    const ROOT_REFRESH_EVERY = opts.rootRefreshEvery || 1000;
     let lastRootRefreshCount = 0;
 
     for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
@@ -140,14 +140,17 @@ export async function runIngest(codexHome, state, opts = {}) {
         state.current_date_bucket = d.toLocaleDateString('en-CA', { timeZone: tz });
       }
 
-      const results = await Promise.all(
-        batch.map(s => enrichFromRollout(s.rollout_path, { timezone: tz, toDayKey }).catch(() => null))
-      );
+      const results = await workerPool.mapRollouts(batch.map((session) => session.rollout_path), tz);
       if (!isCurrentRun()) return;
+
+      const workerError = results.find((result) => result?.ok === false);
+      if (workerError) {
+        throw new Error(`Rollout worker failure: ${workerError.error}`);
+      }
 
       for (let j = 0; j < batch.length; j++) {
         const s = batch[j];
-        const data = results[j];
+        const data = results[j]?.data || null;
         if (data) {
           if (data.model_name) s.model_name = normalizeModelName(data.model_name);
           if (data.reasoning_effort) s.reasoning_effort = data.reasoning_effort;
@@ -210,14 +213,12 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.phase = 'error';
     console.error('Ingest error:', err);
     flushLive(state, 'ingest-error');
+  } finally {
+    await workerPool.close();
   }
 }
 
 export function restartIngest(codexHome, state, opts = {}) {
-  if (state.live_flush_timer) {
-    clearTimeout(state.live_flush_timer);
-    state.live_flush_timer = null;
-  }
   if (state.live_pump_timer) {
     clearInterval(state.live_pump_timer);
     state.live_pump_timer = null;
@@ -369,10 +370,6 @@ function stopLivePumpIfIdle(state) {
 }
 
 function flushLive(state, forcedEvent = null) {
-  if (state.live_flush_timer) {
-    clearTimeout(state.live_flush_timer);
-    state.live_flush_timer = null;
-  }
   if (!state.live_subscribers.size) {
     state.live_pending_patch = createEmptyLivePatch();
     state.live_progress_dirty = false;

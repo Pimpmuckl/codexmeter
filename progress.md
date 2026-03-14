@@ -43,3 +43,40 @@
   - full real-data ingest completed in `39484ms` on `~/.codex`
   - dataset size in that run: `4737` rollout-backed threads enriched to completion
   - `npm run build` passes after the optimization changes
+- Committed the first optimization checkpoint as `7799b4a` (`perf: speed up ingest bookkeeping`).
+- Started the next optimization round focused on update pressure:
+  - reduced live emit cadence to `20Hz`
+  - added incremental live top-key tracking for repo/model/family rankings
+  - switched client live-state merging to structural sharing instead of full-state cloning
+  - changed rollout enrichment parsing to direct `readFile` and increased batch size to `40`
+- Current validation:
+  - parser swap alone benchmarked around `43663ms`
+  - with larger batches/root refresh tuning the current benchmark is `40493ms`
+  - `npm run build` still passes
+- Began the worker-thread rollout-enrichment phase.
+- Implemented:
+  - bounded worker pool in `server/rollout-worker-pool.js`
+  - worker entrypoint in `server/rollout-worker.js`
+  - main-thread ingest integration in `server/ingest.js`
+  - retained shared rollout parsing logic in `server/rollout-reader.js`
+- Validation:
+  - full real-data ingest completed in `15564ms` on `~/.codex`
+  - dataset size in that run: `4738` rollout-backed threads
+  - `npm run build` passes after the worker-thread integration
+- Postflight review findings were applied:
+  - worker failures now surface as real ingest failures instead of silent `null` enrichment
+  - crashed workers are replaced instead of shrinking the pool permanently
+  - stale `live_flush_timer` state was removed from `server/ingest.js`
+- Final current validation:
+  - hardened worker-thread ingest completed in `16647ms` on `~/.codex`
+  - dataset size in that run: `4738` rollout-backed threads
+  - `npm run build` still passes
+- Ran a broader tuning sweep and locked better defaults:
+  - worker-count sweep confirmed the knee is around `6-8` workers
+  - larger batches helped materially; best measured result was with `batchSize=100`
+  - `rootRefreshEvery=1000` beat `500` in the measured winner
+- Best measured configuration on current machine/data:
+  - `workerThreads=8`
+  - `batchSize=100`
+  - `rootRefreshEvery=1000`
+  - full ingest time: `14660ms`

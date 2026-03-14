@@ -20,16 +20,19 @@ export function createLiveAggregateState(tz) {
       d7: new Map(),
       d30: new Map(),
     },
+    repoTopKeys: createTopKeyRanges(),
     models: {
       total: new Map(),
       d7: new Map(),
       d30: new Map(),
     },
+    modelTopKeys: createTopKeyRanges(),
     families: {
       total: new Map(),
       d7: new Map(),
       d30: new Map(),
     },
+    familyTopKeys: createTopKeyRanges(),
     daily: new Map(),
     heatmap: new Map(),
     toDayKey: createDayKeyFormatter(tz),
@@ -56,9 +59,9 @@ export function applySessionToLiveState(live, session, patch) {
     applyOverviewBucket(live.overview[rangeKey], session, rootId);
     patch.overview.add(rangeKey);
 
-    applyRepoBucket(live.repos[rangeKey], session, patch.repos[rangeKey]);
-    applyModelBucket(live.models[rangeKey], session, patch.models[rangeKey]);
-    applyFamilyBucket(live.families[rangeKey], session, patch.families[rangeKey]);
+    applyRepoBucket(live.repos[rangeKey], live.repoTopKeys[rangeKey], session, patch.repos[rangeKey]);
+    applyModelBucket(live.models[rangeKey], live.modelTopKeys[rangeKey], session, patch.models[rangeKey]);
+    applyFamilyBucket(live.families[rangeKey], live.familyTopKeys[rangeKey], session, patch.families[rangeKey]);
   }
 
   applyDailyBucket(live.daily, session, live.toDayKey, patch.daily);
@@ -68,9 +71,9 @@ export function applySessionToLiveState(live, session, patch) {
 export function buildLiveBootstrap(live) {
   return {
     overview: serializeOverview(live),
-    repos: serializeTopRanges(live.repos, serializeRepoSummary),
-    models: serializeTopRanges(live.models, serializeModelSummary),
-    families: serializeTopRanges(live.families, serializeFamilySummary),
+    repos: serializeTopRanges(live.repos, live.repoTopKeys, serializeRepoSummary),
+    models: serializeTopRanges(live.models, live.modelTopKeys, serializeModelSummary),
+    families: serializeTopRanges(live.families, live.familyTopKeys, serializeFamilySummary),
     daily: serializeDaily(live.daily),
     heatmap: serializeHeatmap(live.heatmap),
   };
@@ -81,11 +84,19 @@ export function buildLivePatch(live, patch) {
     overview: Object.fromEntries(
       [...patch.overview].map((rangeKey) => [rangeKey, serializeOverviewBucket(live.overview[rangeKey])])
     ),
-    repos: serializePatchedTopRanges(live.repos, patch.repos, serializeRepoSummary),
-    models: serializePatchedTopRanges(live.models, patch.models, serializeModelSummary),
-    families: serializePatchedTopRanges(live.families, patch.families, serializeFamilySummary),
+    repos: serializePatchedTopRanges(live.repos, live.repoTopKeys, patch.repos, serializeRepoSummary),
+    models: serializePatchedTopRanges(live.models, live.modelTopKeys, patch.models, serializeModelSummary),
+    families: serializePatchedTopRanges(live.families, live.familyTopKeys, patch.families, serializeFamilySummary),
     daily: Object.fromEntries([...patch.daily].map((dayKey) => [dayKey, serializeDailyEntry(live.daily.get(dayKey))])),
     heatmap: Object.fromEntries([...patch.heatmap].map((dayKey) => [dayKey, serializeHeatmapEntry(live.heatmap.get(dayKey))])),
+  };
+}
+
+function createTopKeyRanges() {
+  return {
+    total: [],
+    d7: [],
+    d30: [],
   };
 }
 
@@ -132,7 +143,7 @@ function applyOverviewBucket(bucket, session, rootId) {
   if (session.ended_at && session.ended_at > bucket.latest) bucket.latest = session.ended_at;
 }
 
-function applyRepoBucket(repoMap, session, dirtySet) {
+function applyRepoBucket(repoMap, topKeys, session, dirtySet) {
   const key = session.repo_label || 'unknown';
   if (!repoMap.has(key)) {
     repoMap.set(key, {
@@ -156,10 +167,11 @@ function applyRepoBucket(repoMap, session, dirtySet) {
     if (session.cost_source === 'heuristic') repo.heuristic_priced += 1;
   }
 
+  updateTopKeys(repoMap, topKeys, key);
   dirtySet.add(key);
 }
 
-function applyModelBucket(modelMap, session, dirtySet) {
+function applyModelBucket(modelMap, topKeys, session, dirtySet) {
   const key = session.model_name || 'unknown';
   if (!modelMap.has(key)) {
     modelMap.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0 });
@@ -174,10 +186,11 @@ function applyModelBucket(modelMap, session, dirtySet) {
     if (session.cost_source === 'heuristic') model.heuristic_priced += 1;
   }
 
+  updateTopKeys(modelMap, topKeys, key);
   dirtySet.add(key);
 }
 
-function applyFamilyBucket(familyMap, session, dirtySet) {
+function applyFamilyBucket(familyMap, topKeys, session, dirtySet) {
   const key = session.agent_family || 'generic';
   if (!familyMap.has(key)) {
     familyMap.set(key, { family: key, tokens: 0, cost: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0 });
@@ -190,6 +203,7 @@ function applyFamilyBucket(familyMap, session, dirtySet) {
     if (session.cost_source === 'exact') family.exact_priced += 1;
     if (session.cost_source === 'heuristic') family.heuristic_priced += 1;
   }
+  updateTopKeys(familyMap, topKeys, key);
   dirtySet.add(key);
 }
 
@@ -312,28 +326,28 @@ function serializeOverviewBucket(bucket) {
   };
 }
 
-function serializeTopRanges(rangeMaps, projector) {
+function serializeTopRanges(rangeMaps, topKeyRanges, projector) {
   return {
-    total: serializeTopRange(rangeMaps.total, projector),
-    d7: serializeTopRange(rangeMaps.d7, projector),
-    d30: serializeTopRange(rangeMaps.d30, projector),
+    total: serializeTopRange(rangeMaps.total, topKeyRanges.total, projector),
+    d7: serializeTopRange(rangeMaps.d7, topKeyRanges.d7, projector),
+    d30: serializeTopRange(rangeMaps.d30, topKeyRanges.d30, projector),
   };
 }
 
-function serializePatchedTopRanges(rangeMaps, dirtyRanges, projector) {
+function serializePatchedTopRanges(rangeMaps, topKeyRanges, dirtyRanges, projector) {
   const out = {};
   for (const rangeKey of ['total', 'd7', 'd30']) {
     if (dirtyRanges[rangeKey].size > 0) {
-      out[rangeKey] = serializeTopRange(rangeMaps[rangeKey], projector);
+      out[rangeKey] = serializeTopRange(rangeMaps[rangeKey], topKeyRanges[rangeKey], projector);
     }
   }
   return out;
 }
 
-function serializeTopRange(map, projector, limit = 6) {
-  return [...map.values()]
-    .sort((a, b) => (b?.tokens || 0) - (a?.tokens || 0))
-    .slice(0, limit)
+function serializeTopRange(map, topKeys, projector) {
+  return topKeys
+    .map((key) => map.get(key))
+    .filter(Boolean)
     .map(projector);
 }
 
@@ -375,6 +389,31 @@ function deepRoundClone(source, numericKeys) {
     }
   }
   return out;
+}
+
+function updateTopKeys(map, topKeys, key, limit = 6) {
+  if (!topKeys.includes(key)) {
+    if (topKeys.length < limit) {
+      topKeys.push(key);
+    } else {
+      const weakestKey = topKeys[topKeys.length - 1];
+      const weakestValue = map.get(weakestKey)?.tokens || 0;
+      const nextValue = map.get(key)?.tokens || 0;
+      if (nextValue <= weakestValue) return;
+      topKeys.push(key);
+    }
+  }
+
+  topKeys.sort((a, b) => {
+    const aValue = map.get(a)?.tokens || 0;
+    const bValue = map.get(b)?.tokens || 0;
+    if (bValue !== aValue) return bValue - aValue;
+    return String(a).localeCompare(String(b));
+  });
+
+  if (topKeys.length > limit) {
+    topKeys.length = limit;
+  }
 }
 
 function serializeRepoSummary(value) {

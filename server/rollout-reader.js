@@ -1,5 +1,5 @@
-import { createReadStream, existsSync } from 'fs';
-import { createInterface } from 'readline';
+import { existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { createDayKeyFormatter } from './day-key.js';
 
 const ACTIVE_GAP_CAP_MS = 15 * 60 * 1000;
@@ -23,15 +23,12 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
   };
 
   try {
-    const rl = createInterface({
-      input: createReadStream(rolloutPath, { encoding: 'utf8' }),
-      crlfDelay: Infinity,
-    });
+    const content = await readFile(rolloutPath, 'utf8');
 
     let prevTimestamp = null;
     let activeMs = 0;
     const activeByDay = new Map();
-    for await (const line of rl) {
+    for (const line of content.split(/\r?\n/)) {
       if (!line.trim()) continue;
 
       try {

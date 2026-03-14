@@ -35,3 +35,30 @@
   - Reducing full root-resolution passes from every batch to periodic refreshes plus one final exact pass preserves final correctness while removing the worst per-batch full-array walk.
   - Live-state bookkeeping for ingest now only keeps the fields the live Overview transport actually serializes; nested live repo/model/daily breakdown objects were pure overhead.
   - Real-data validation on `~/.codex` improved full ingest time from the earlier roughly `48s` class to `39.5s` for `4737` rollout-backed threads.
+- Next-round transport/perf findings:
+  - Reducing live emit cadence from `~60Hz` to `20Hz` is appropriate because the current bottleneck is how quickly end-to-end updates can arrive and be consumed, not lack of raw emit frequency.
+  - Live rankings serialization was still sorting whole repo/model/family maps on each patch; incremental top-key tracking removes that repeated full sort work from hot live patch generation.
+  - Client-side live merge work was cloning the entire live state on every SSE event in `src/live-state.js`; structural-sharing merges cut a lot of avoidable array/object copying on the hot path.
+  - Rollout parsing with `readline`/stream iteration was slower than direct file reads on the current dataset; switching `server/rollout-reader.js` to `readFile(..., 'utf8')` improved raw ingest throughput on local validation.
+  - Bigger enrichment batches helped after the parser swap: current local validation landed around `40.5s` for `4738` rollout-backed threads, versus `43.7s` with direct-file parsing alone and `47.6s` on the earlier 20Hz/top-list-cache intermediate state.
+- Worker-thread enrichment findings:
+  - The bounded worker pool is the first optimization that produced a major step-change instead of an incremental one.
+  - Keeping worker jobs tiny (`rolloutPath`, `timezone`) and leaving all session mutation/live SSE state on the main thread avoided structured-clone bloat.
+  - Workers must be created with `execArgv: []` in this environment; otherwise eval-based benchmarking leaks `--input-type=module` into child workers and breaks file-based worker startup.
+  - Local validation after the worker-pool integration completed full ingest in about `15.6s` for `4738` rollout-backed threads, far below the earlier non-threaded `~40s` class.
+  - Postflight hardening kept the speedup intact: typed worker results, worker respawn on failure, and fail-fast ingest behavior still landed around `16.6s` on the same dataset.
+- Pool/batch tuning sweep on the same dataset (`4738` rollout-backed threads):
+  - `1 worker / batch 40` -> `46200ms`
+  - `2 workers / batch 40` -> `28045ms`
+  - `4 workers / batch 40` -> `19459ms`
+  - `6 workers / batch 40` -> `16123ms`
+  - `8 workers / batch 40` -> `15686ms`
+  - `4 workers / batch 25` -> `24076ms`
+  - `4 workers / batch 60` -> `18137ms`
+  - `6 workers / batch 60` -> `16660ms`
+  - tighter sweep winner: `8 workers / batch 100 / rootRefreshEvery 1000` -> `14660ms`
+  - nearby variants (`8/80/1000`, `8/120/1000`, `8/120/2000`) were close but not better in the measured runs.
+- Conclusion from the full sweep:
+  - The dominant wins were worker-thread rollout enrichment and larger enrichment batches.
+  - `20Hz` live cadence is worth keeping to reduce update pressure.
+  - After the worker pool + batch/root tuning, no remaining backend-only optimization idea looked likely to beat the current path without a larger redesign or more invasive caching strategy.
