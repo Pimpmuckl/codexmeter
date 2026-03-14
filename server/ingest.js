@@ -9,6 +9,7 @@ import { buildAggregates, buildSessionView } from './aggregator.js';
 import { createDayKeyFormatter } from './day-key.js';
 import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap, buildLivePatch } from './live-state.js';
 import { createRolloutWorkerPool } from './rollout-worker-pool.js';
+import { beginReplayCapture, createReplayCaptureState, failReplayCapture, getReplaySnapshot, recordReplayEvent, resetReplayCapture } from './export-replay.js';
 import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 
 const LIVE_FRAME_INTERVAL_MS = 50;
@@ -43,6 +44,7 @@ export function createIngestState() {
     live_progress_dirty: false,
     live_last_emit_at: 0,
     live_last_overview_emit_at: 0,
+    replay_capture: createReplayCaptureState(),
   };
 }
 
@@ -57,6 +59,12 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.live_state = createLiveAggregateState(tz);
     state.phase = 'inventory';
     state.percent = 0;
+    beginReplayCapture(state.replay_capture, state.ingest_id, {
+      ingest_id: state.ingest_id,
+      seq: 0,
+      progress: progressPayload(state),
+      data: buildLiveBootstrap(state.live_state),
+    });
     queueLiveProgress(state);
     broadcastBootstrap(state);
 
@@ -235,6 +243,7 @@ export async function runIngest(codexHome, state, opts = {}) {
     if (!isCurrentRun()) return;
     state.error = err.message;
     state.phase = 'error';
+    failReplayCapture(state.replay_capture);
     console.error('Ingest error:', err);
     flushLive(state, 'ingest-error');
   } finally {
@@ -270,6 +279,7 @@ export function restartIngest(codexHome, state, opts = {}) {
   state.live_progress_dirty = false;
   state.live_last_emit_at = 0;
   state.live_last_overview_emit_at = 0;
+  resetReplayCapture(state.replay_capture);
 
   return runIngest(codexHome, state, opts);
 }
@@ -442,13 +452,14 @@ function queueLivePatch(state, patch) {
 }
 
 function ensureLivePump(state) {
-  if (state.live_pump_timer || !state.live_subscribers.size) return;
+  if (state.live_pump_timer) return;
+  if (!state.live_subscribers.size && !state.replay_capture.active) return;
   state.live_pump_timer = setInterval(() => flushLive(state), LIVE_FRAME_INTERVAL_MS);
 }
 
 function stopLivePumpIfIdle(state) {
   if (!state.live_pump_timer) return;
-  if (state.live_subscribers.size) return;
+  if (state.live_subscribers.size || state.replay_capture.active) return;
   clearInterval(state.live_pump_timer);
   state.live_pump_timer = null;
   finalizeWithoutSubscribers(state);
@@ -456,6 +467,7 @@ function stopLivePumpIfIdle(state) {
 
 function finalizeWithoutSubscribers(state) {
   if (state.live_subscribers.size) return;
+  if (state.replay_capture.active) return;
   if (!state.presentation_complete_pending) return;
   state.phase = 'complete';
   state.percent = 1;
@@ -466,7 +478,7 @@ function finalizeWithoutSubscribers(state) {
 }
 
 function flushLive(state, forcedEvent = null) {
-  if (!state.live_subscribers.size) {
+  if (!state.live_subscribers.size && !state.replay_capture.active) {
     state.live_pending_patch = createEmptyLivePatch();
     state.live_progress_dirty = false;
     stopLivePumpIfIdle(state);
@@ -506,12 +518,16 @@ function flushLive(state, forcedEvent = null) {
     payload.data = buildLiveBootstrap(state.live_state);
   }
 
-  broadcastLive(state, event, payload);
+  recordReplayEvent(state.replay_capture, event, payload);
+  if (state.live_subscribers.size) {
+    broadcastLive(state, event, payload);
+  }
   state.live_last_emit_at = Date.now();
   state.live_progress_dirty = shouldEmitComplete ? false : (event === 'progress' ? false : state.live_progress_dirty);
   if (forcedEvent) {
     state.live_pending_patch = createEmptyLivePatch();
   }
+  stopLivePumpIfIdle(state);
 }
 
 function broadcastLive(state, event, payload) {
@@ -664,6 +680,10 @@ export function attachLiveSubscriber(state, res) {
 export function detachLiveSubscriber(state, res) {
   state.live_subscribers.delete(res);
   stopLivePumpIfIdle(state);
+}
+
+export function getLatestReplay(state) {
+  return getReplaySnapshot(state.replay_capture);
 }
 
 function broadcastBootstrap(state) {

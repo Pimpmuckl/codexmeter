@@ -64,7 +64,7 @@ function getOverviewDailyBarSizing(count) {
   return { barWidth: null, barMaxWidth: 12 };
 }
 
-function DailySpark({ daily }) {
+function DailySpark({ daily, exportMode = false }) {
   if (!daily?.dates?.length) {
     return (
       <div className="overview-daily-spark overview-daily-spark-empty">
@@ -115,7 +115,14 @@ function DailySpark({ daily }) {
     <div className="overview-daily-spark">
       <span className="overview-daily-spark-title">Daily Usage</span>
       <div className="overview-daily-spark-chart">
-        <ReactEChartsCore echarts={echarts} option={option} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={false} notMerge={false} />
+        <ReactEChartsCore
+          echarts={echarts}
+          option={option}
+          style={{ width: '100%', height: '100%' }}
+          theme="dark"
+          lazyUpdate={false}
+          notMerge={exportMode}
+        />
       </div>
     </div>
   );
@@ -252,30 +259,13 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
   );
 }
 
-function Overview({
-  data,
-  heatmap,
-  daily,
-  families,
-  repos,
-  models,
-  range = 'total',
-  onPresentationSettledChange = null,
+export function OverviewFrame({
+  presentation,
   ingestProgress = 0,
   isIngestActive = false,
+  exportMode = false,
 }) {
-  const presentation = useAnimatedOverviewPresentation(
-    { overview: data, heatmap, daily, families, repos, models, range },
-    {
-      duration: OVERVIEW_PRESENTATION_DURATION_MS,
-      onSettledChange: onPresentationSettledChange,
-      ingestProgress,
-      isIngestActive,
-    }
-  );
-
-  if (!presentation.ready) return null;
-
+  if (!presentation?.ready) return null;
   const { stats, topRepos, topFamilies, topModels } = presentation;
   const reversedRepos = [...topRepos.slice(0, 6)].reverse();
   const maxRepoTokens = Math.max(...topRepos.slice(0, 6).map(row => row.tokens || 0), 1);
@@ -285,6 +275,7 @@ function Overview({
   const repoOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_BARS,
+    ...(exportMode ? { animation: false } : {}),
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -334,6 +325,7 @@ function Overview({
   const familyOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
+    ...(exportMode ? { animation: false } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -342,7 +334,7 @@ function Overview({
     },
     series: [{
       type: 'pie',
-      animation: ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
@@ -366,6 +358,7 @@ function Overview({
   const modelOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
+    ...(exportMode ? { animation: false } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -374,7 +367,7 @@ function Overview({
     },
     series: [{
       type: 'pie',
-      animation: ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
@@ -419,7 +412,7 @@ function Overview({
             <div className="stat-per-day"><span className="stat-per-day-value">{(stats.sessions / stats.days).toFixed(1)}</span> per day</div>
           </div>
         </div>
-        <DailySpark daily={presentation.daily} />
+        <DailySpark daily={presentation.daily} exportMode={exportMode} />
       </div>
 
       <Heatmap heatmapData={presentation.heatmap} isIngestActive={isIngestActive} ingestProgress={ingestProgress} />
@@ -428,7 +421,7 @@ function Overview({
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Top Repos</div>
           {topRepos.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={false} />
+            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -470,6 +463,37 @@ function Overview({
         </span>
       </div>
     </div>
+  );
+}
+
+function Overview({
+  data,
+  heatmap,
+  daily,
+  families,
+  repos,
+  models,
+  range = 'total',
+  onPresentationSettledChange = null,
+  ingestProgress = 0,
+  isIngestActive = false,
+}) {
+  const presentation = useAnimatedOverviewPresentation(
+    { overview: data, heatmap, daily, families, repos, models, range },
+    {
+      duration: OVERVIEW_PRESENTATION_DURATION_MS,
+      onSettledChange: onPresentationSettledChange,
+      ingestProgress,
+      isIngestActive,
+    }
+  );
+
+  return (
+    <OverviewFrame
+      presentation={presentation}
+      ingestProgress={ingestProgress}
+      isIngestActive={isIngestActive}
+    />
   );
 }
 

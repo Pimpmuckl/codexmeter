@@ -1,0 +1,270 @@
+import fs from 'fs/promises';
+import fsSync from 'fs';
+import os from 'os';
+import path from 'path';
+import { randomUUID } from 'crypto';
+import { spawn } from 'child_process';
+import ffmpegPath from 'ffmpeg-static';
+import { chromium } from 'playwright-core';
+import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
+
+const EXPORT_WIDTH = OVERVIEW_INGEST_ANIMATION.videoExport?.width ?? 1080;
+const EXPORT_HEIGHT = OVERVIEW_INGEST_ANIMATION.videoExport?.height ?? 864;
+const EXPORT_FPS = OVERVIEW_INGEST_ANIMATION.videoExport?.fps ?? 24;
+const EXPORT_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.durationMs ?? 10000;
+
+export function createExportManager({ getReplay, getBaseUrl }) {
+  const jobs = new Map();
+
+  return {
+    async startOverviewVideoJob(clientBaseUrl) {
+      const replay = getReplay();
+      if (!replay?.bootstrap) {
+        const err = new Error('No completed ingest replay is available yet.');
+        err.statusCode = 409;
+        throw err;
+      }
+
+      const jobId = randomUUID();
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codexmeter-video-'));
+      const framesDir = path.join(tempDir, 'frames');
+      const outputPath = path.join(tempDir, 'codexmeter-overview.mp4');
+      await fs.mkdir(framesDir, { recursive: true });
+
+      const job = {
+        id: jobId,
+        type: 'overview-video',
+        status: 'queued',
+        phase: 'preparing',
+        progress: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        replay_ingest_id: replay.ingest_id,
+        replay,
+        width: EXPORT_WIDTH,
+        height: EXPORT_HEIGHT,
+        fps: EXPORT_FPS,
+        duration_ms: EXPORT_DURATION_MS,
+        temp_dir: tempDir,
+        frames_dir: framesDir,
+        output_path: outputPath,
+        file_name: `codexmeter-overview-${jobId.slice(0, 8)}.mp4`,
+        client_base_url: clientBaseUrl || null,
+        error: null,
+      };
+
+      jobs.set(jobId, job);
+      void runOverviewVideoJob(job, replay, getBaseUrl);
+      return sanitizeJob(job);
+    },
+
+    getJob(jobId) {
+      return jobs.get(jobId) || null;
+    },
+
+    listJobs() {
+      return [...jobs.values()];
+    },
+
+    getRenderPayload(jobId) {
+      const job = jobs.get(jobId);
+      if (!job) return null;
+      return {
+        jobId: job.id,
+        width: job.width,
+        height: job.height,
+        fps: job.fps,
+        durationMs: job.duration_ms,
+        replay: job.replay,
+      };
+    },
+
+    sanitizeJob,
+  };
+
+  function sanitizeJob(job) {
+    if (!job) return null;
+    return {
+      id: job.id,
+      type: job.type,
+      status: job.status,
+      phase: job.phase,
+      progress: job.progress,
+      created_at: job.created_at,
+      updated_at: job.updated_at,
+      replay_ingest_id: job.replay_ingest_id,
+      file_name: job.file_name,
+      download_url: job.status === 'complete' ? `/api/export/${job.id}/file` : null,
+      error: job.error,
+    };
+  }
+
+  async function runOverviewVideoJob(job, replay, getBaseUrlFn) {
+    try {
+      updateJob(job, 'rendering', 0.02, 'running');
+
+      const baseUrl = await getBaseUrlFn(job.client_base_url);
+      const browserPath = await detectBrowserExecutable();
+      const browser = await chromium.launch({
+        headless: true,
+        executablePath: browserPath,
+      });
+
+      try {
+        const page = await browser.newPage({
+          viewport: { width: job.width, height: job.height },
+          deviceScaleFactor: 1,
+        });
+
+        const exportUrl = `${baseUrl}/?export=overview-video&job=${encodeURIComponent(job.id)}`;
+        await page.goto(exportUrl, { waitUntil: 'networkidle' });
+        await page.waitForFunction(
+          (expectedJobId) => window.__CODEXMETER_EXPORT__?.ready === true && window.__CODEXMETER_EXPORT__?.jobId === expectedJobId,
+          job.id,
+          { timeout: 30000 }
+        );
+
+        const totalFrames = Math.max(2, Math.ceil((job.duration_ms / 1000) * job.fps));
+        const frameStepMs = 1000 / job.fps;
+
+        for (let i = 0; i < totalFrames; i += 1) {
+          const timeMs = Math.min(job.duration_ms, Math.round(i * frameStepMs));
+          await page.evaluate((ms) => window.__CODEXMETER_EXPORT__?.seek(ms), timeMs);
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+          const framePath = path.join(job.frames_dir, `${String(i).padStart(5, '0')}.png`);
+          await page.screenshot({ path: framePath, type: 'png' });
+          updateJob(job, 'rendering', 0.05 + ((i + 1) / totalFrames) * 0.8, 'running');
+        }
+      } finally {
+        await browser.close();
+      }
+
+      updateJob(job, 'encoding', 0.9, 'running');
+      await encodeFramesToMp4(job.frames_dir, job.output_path, job.fps);
+      updateJob(job, 'complete', 1, 'complete');
+    } catch (err) {
+      job.error = err instanceof Error ? err.message : String(err);
+      updateJob(job, 'failed', job.progress || 0, 'failed');
+    }
+  }
+}
+
+export function createVideoExportManager() {
+  let replayGetter = () => null;
+  let baseUrlResolver = async (clientBaseUrl) => clientBaseUrl || null;
+  const manager = createExportManager({
+    getReplay: () => replayGetter(),
+    getBaseUrl: (clientBaseUrl) => baseUrlResolver(clientBaseUrl),
+  });
+  manager.setReplayGetter = (fn) => {
+    replayGetter = fn;
+  };
+  manager.setBaseUrlResolver = (fn) => {
+    baseUrlResolver = fn;
+  };
+  return manager;
+}
+
+export function startOverviewVideoExport(manager, { replay, appBaseUrl }) {
+  manager.setReplayGetter(() => replay);
+  manager.setBaseUrlResolver(async (clientBaseUrl) => clientBaseUrl || appBaseUrl);
+  return manager.startOverviewVideoJob(appBaseUrl);
+}
+
+export function getVideoExportJob(manager, jobId) {
+  return manager.getJob(jobId);
+}
+
+export function getActiveVideoExportJob(manager) {
+  const jobs = manager.listJobs ? manager.listJobs() : [];
+  return jobs
+    .filter((job) => job.status === 'queued' || job.status === 'running')
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0] || null;
+}
+
+export function createJobSummary(job) {
+  if (!job) return null;
+  return {
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    phase: job.phase,
+    progress: job.progress,
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+    replay_ingest_id: job.replay_ingest_id,
+    file_name: job.file_name,
+    download_url: job.status === 'complete' ? `/api/export/${job.id}/file` : null,
+    error: job.error || null,
+  };
+}
+
+function updateJob(job, phase, progress, status) {
+  job.phase = phase;
+  job.progress = Math.max(0, Math.min(progress, 1));
+  job.status = status;
+  job.updated_at = new Date().toISOString();
+}
+
+async function detectBrowserExecutable() {
+  if (process.env.CODEXMETER_EXPORT_BROWSER && fsSync.existsSync(process.env.CODEXMETER_EXPORT_BROWSER)) {
+    return process.env.CODEXMETER_EXPORT_BROWSER;
+  }
+
+  const candidates = process.platform === 'win32'
+    ? [
+      process.env['PROGRAMFILES'] ? path.join(process.env['PROGRAMFILES'], 'Google', 'Chrome', 'Application', 'chrome.exe') : null,
+      process.env['PROGRAMFILES(X86)'] ? path.join(process.env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe') : null,
+      process.env['PROGRAMFILES'] ? path.join(process.env['PROGRAMFILES'], 'Microsoft', 'Edge', 'Application', 'msedge.exe') : null,
+      process.env['PROGRAMFILES(X86)'] ? path.join(process.env['PROGRAMFILES(X86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe') : null,
+    ]
+    : process.platform === 'darwin'
+      ? [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      ]
+      : [
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/microsoft-edge',
+      ];
+
+  for (const candidate of candidates.filter(Boolean)) {
+    if (fsSync.existsSync(candidate)) return candidate;
+  }
+
+  const err = new Error('No supported Chrome/Chromium/Edge executable was found for video export.');
+  err.statusCode = 500;
+  throw err;
+}
+
+async function encodeFramesToMp4(framesDir, outputPath, fps) {
+  const inputPattern = path.join(framesDir, '%05d.png');
+  if (!ffmpegPath) {
+    throw new Error('ffmpeg-static is unavailable');
+  }
+  await new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, [
+      '-y',
+      '-framerate', String(fps),
+      '-i', inputPattern,
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      outputPath,
+    ], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on('error', reject);
+    proc.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr || `ffmpeg exited with code ${code}`));
+    });
+  });
+}

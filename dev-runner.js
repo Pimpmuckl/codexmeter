@@ -36,6 +36,7 @@ const backend = spawn(
     env: {
       ...process.env,
       CODEXMETER_DEV_API_ONLY: '1',
+      CODEXMETER_FRONTEND_URL: webUrl,
     },
   }
 );

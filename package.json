@@ -26,7 +26,9 @@
     "commander": "^13.1.0",
     "express": "^5.1.0",
     "fast-glob": "^3.3.3",
-    "open": "^10.1.0"
+    "ffmpeg-static": "^5.2.0",
+    "open": "^10.1.0",
+    "playwright-core": "^1.58.2"
   },
   "devDependencies": {
     "@tanstack/react-table": "^8.21.3",

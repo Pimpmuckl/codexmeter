@@ -5,6 +5,7 @@ import Repos from './components/Repos';
 import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
+import OverviewVideoExport from './components/OverviewVideoExport';
 import { buildLiveDataEnvelope, mergeLiveEvent } from './live-state';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
@@ -32,6 +33,13 @@ const PHASE_LABELS = {
 };
 
 export default function App() {
+  const search = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const exportMode = search?.get('export');
+  const exportJobId = search?.get('job');
+  if (exportMode === 'overview-video' && exportJobId) {
+    return <OverviewVideoExport jobId={exportJobId} />;
+  }
+
   const [progress, setProgress] = useState(null);
   const [tab, setTab] = useState('Overview');
   const [range, setRange] = useState('total');
@@ -44,6 +52,8 @@ export default function App() {
   const [rerunning, setRerunning] = useState(false);
   const [overviewPresentationSettled, setOverviewPresentationSettled] = useState(true);
   const [completionPresentationPending, setCompletionPresentationPending] = useState(false);
+  const [exportJob, setExportJob] = useState(null);
+  const [startingExport, setStartingExport] = useState(false);
   const prevBackendCompleteRef = useRef(false);
 
   const fetchAll = useCallback(async () => {
@@ -73,6 +83,24 @@ export default function App() {
       setRerunning(false);
     }
   }, [rerunning]);
+
+  const handleStartOverviewVideoExport = useCallback(async () => {
+    if (startingExport) return;
+    try {
+      setStartingExport(true);
+      const job = await api.startOverviewVideoExport();
+      setExportJob(job);
+    } catch (err) {
+      console.error('Video export error:', err);
+    } finally {
+      setStartingExport(false);
+    }
+  }, [startingExport]);
+
+  const handleDownloadOverviewVideo = useCallback(() => {
+    if (!exportJob?.id || exportJob.status !== 'complete') return;
+    window.location.href = api.url(`/api/export/${encodeURIComponent(exportJob.id)}/file`);
+  }, [exportJob]);
 
   useEffect(() => {
     let alive = true;
@@ -278,6 +306,42 @@ export default function App() {
   }, [backendComplete, overviewPresentationSettled, completionPresentationPending]);
 
   useEffect(() => {
+    let alive = true;
+    let timer = null;
+
+    const poll = async () => {
+      try {
+        const isSpecificJob = Boolean(exportJob?.id);
+        const payload = isSpecificJob
+          ? await api.exportStatus(exportJob.id)
+          : await api.activeExport();
+        if (!alive) return;
+        const job = isSpecificJob ? payload : payload.job;
+        if (!job) {
+          if (!exportJob?.id) setExportJob(null);
+          return;
+        }
+        setExportJob(job);
+        if (!['complete', 'failed'].includes(job.status)) {
+          timer = setTimeout(poll, 900);
+        }
+      } catch (err) {
+        if (!alive) return;
+        console.error('Export status error:', err);
+      }
+    };
+
+    if (backendComplete) {
+      poll();
+    }
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [backendComplete, exportJob?.id]);
+
+  useEffect(() => {
     if (!visibleIngesting && !ingestFadeOut) setIngestFadeOut(true);
     if (visibleIngesting) {
       setIngestFadeOut(false);
@@ -303,6 +367,12 @@ export default function App() {
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
   const dateRange = d?.date_range;
+  const exportBusy = startingExport || ['queued', 'running'].includes(exportJob?.status);
+  const exportLabel = exportJob?.status === 'complete'
+    ? 'Download MP4'
+    : exportBusy
+      ? `Rendering ${Math.max(1, Math.round((exportJob?.progress || 0) * 100))}%`
+      : 'Render Video';
 
   return (
     <div className="app">
@@ -372,6 +442,16 @@ export default function App() {
                   disabled={rerunning || !backendComplete}
                 >
                   ↻
+                </button>
+                <button
+                  type="button"
+                  className="range-btn"
+                  onClick={exportJob?.status === 'complete' ? handleDownloadOverviewVideo : handleStartOverviewVideoExport}
+                  disabled={!backendComplete || exportBusy}
+                  style={{ minWidth: 110 }}
+                  title="Render Overview ingest replay video"
+                >
+                  {exportLabel}
                 </button>
               </div>
             )}
