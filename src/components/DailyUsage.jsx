@@ -1,14 +1,14 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
-import { BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent } from 'echarts/components';
+import { BarChart, LineChart, PieChart } from 'echarts/charts';
+import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, GraphicComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { getModelColor, getFamilyColor, getRepoColor } from '../utils/colors';
-import { ECHARTS_ANIMATION } from '../utils/echartsDefaults';
+import { getModelColor, getFamilyColor, getRepoColor, getContrastLabelColor } from '../utils/colors';
+import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
-echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
+echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, GraphicComponent, CanvasRenderer]);
 
 function fmt(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
@@ -30,6 +30,11 @@ const SPLIT_MODES = [
   { key: 'family', label: 'By Family' },
 ];
 
+const DISPLAY_MODES = [
+  { key: 'absolute', label: 'Absolute' },
+  { key: 'relative', label: 'Relative' },
+];
+
 function exportChart(ref) {
   if (!ref.current) return;
   const url = ref.current.getEchartsInstance().getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#06080f' });
@@ -41,6 +46,39 @@ function getZoomStart(range, count) {
   if (range === 'd7') return Math.max(0, 100 - (7 / count) * 100);
   if (range === 'd30') return Math.max(0, 100 - (30 / count) * 100);
   return 0;
+}
+
+/** Find the largest rectangle that fits in the band (histogram), return center [x, y] */
+function largestRectInBand(heights, prevStack) {
+  const n = heights.length;
+  if (n === 0) return null;
+  const left = new Array(n);
+  const right = new Array(n);
+  const stack = [];
+  for (let i = 0; i < n; i++) {
+    while (stack.length && heights[stack[stack.length - 1]] >= heights[i]) stack.pop();
+    left[i] = stack.length ? stack[stack.length - 1] : -1;
+    stack.push(i);
+  }
+  stack.length = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    while (stack.length && heights[stack[stack.length - 1]] >= heights[i]) stack.pop();
+    right[i] = stack.length ? stack[stack.length - 1] : n;
+    stack.push(i);
+  }
+  let maxArea = 0;
+  let bestIdx = 0;
+  for (let i = 0; i < n; i++) {
+    const width = right[i] - left[i] - 1;
+    const area = width * heights[i];
+    if (area > maxArea) {
+      maxArea = area;
+      bestIdx = i;
+    }
+  }
+  const centerX = (left[bestIdx] + right[bestIdx]) / 2;
+  const centerY = prevStack[bestIdx] + heights[bestIdx] / 2;
+  return [centerX, centerY];
 }
 
 function DayDetail({ day, chartMode }) {
@@ -88,6 +126,7 @@ function DayDetail({ day, chartMode }) {
 export default function DailyUsage({ data, range = 'total', chartMode = 'default' }) {
   const [metric, setMetric] = useState('tokens');
   const [split, setSplit] = useState('model');
+  const [displayMode, setDisplayMode] = useState('absolute');
   const [selectedDate, setSelectedDate] = useState(null);
   const chartRef = useRef(null);
 
@@ -111,36 +150,173 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
     return [...set];
   }, [daily, split]);
 
-  const series = groups.map((g) => ({
-    name: g,
-    type: 'bar',
-    stack: 'total',
-    data: daily.map((d) => {
-      const src = split === 'model' ? d.by_model : (d.by_family || {});
-      const v = src[g];
-      if (!v) return 0;
-      return metric === 'elapsed_seconds' ? v.elapsed_seconds || 0 : metric === 'cost' ? v.cost || 0 : v.tokens || 0;
-    }),
-    itemStyle: { color: split === 'model' ? getModelColor(g) : getFamilyColor(g) },
-    barMaxWidth: 14,
-  }));
+  const rawSeriesData = useMemo(() => groups.map((g) => {
+    return {
+      name: g,
+      values: daily.map((d) => {
+        const src = split === 'model' ? d.by_model : (d.by_family || {});
+        const v = src[g];
+        if (!v) return 0;
+        return metric === 'elapsed_seconds' ? v.elapsed_seconds || 0 : metric === 'cost' ? v.cost || 0 : v.tokens || 0;
+      }),
+    };
+  }), [groups, daily, split, metric]);
+
+  const dayTotals = useMemo(() => daily.map((_, j) => {
+    let sum = 0;
+    for (const s of rawSeriesData) {
+      sum += s.values[j] || 0;
+    }
+    return sum;
+  }), [daily, rawSeriesData]);
+
+  const isRelative = displayMode === 'relative';
+  let cumulativeData = null;
+  if (isRelative) {
+    const allVals = rawSeriesData.map((s) => {
+      const vals = s.values.map((v, j) => (dayTotals[j] > 0 ? (v / dayTotals[j]) * 100 : 0));
+      for (let j = 1; j < vals.length; j++) {
+        if (dayTotals[j] === 0) vals[j] = vals[j - 1];
+      }
+      return vals;
+    });
+    let cum = allVals[0].map(() => 0);
+    cumulativeData = allVals.map((vals, i) => {
+      const prevStack = [...cum];
+      cum = cum.map((c, j) => c + vals[j]);
+      return { values: vals, prevStack };
+    });
+  }
+  const series = rawSeriesData.map((s, seriesIdx) => {
+    const color = split === 'model' ? getModelColor(s.name) : getFamilyColor(s.name);
+    let data;
+    if (isRelative) {
+      const cd = cumulativeData[seriesIdx];
+      data = cd.values;
+      const labelColor = getContrastLabelColor(color);
+      let labelIdx = 0;
+      let maxVal = 0;
+      for (let j = 0; j < data.length; j++) {
+        if (data[j] > maxVal) {
+          maxVal = data[j];
+          labelIdx = j;
+        }
+      }
+      const showLabel = maxVal >= 8;
+      const centerY = showLabel ? cd.prevStack[labelIdx] + data[labelIdx] / 2 : 0;
+      return {
+        name: s.name,
+        type: 'line',
+        stack: 'total',
+        smooth: 0.2,
+        areaStyle: { opacity: 1 },
+        lineStyle: { width: 0 },
+        symbol: 'none',
+        data,
+        itemStyle: { color },
+      };
+    }
+    data = s.values;
+    return {
+      name: s.name,
+      type: 'bar',
+      stack: 'total',
+      data,
+      itemStyle: { color },
+      barMaxWidth: 14,
+    };
+  });
+
+  const labelSpecs = useMemo(() => {
+    if (!isRelative || !cumulativeData) return [];
+    return cumulativeData
+      .map((cd, seriesIdx) => {
+        const s = rawSeriesData[seriesIdx];
+        const color = split === 'model' ? getModelColor(s.name) : getFamilyColor(s.name);
+        const labelColor = getContrastLabelColor(color);
+        const coord = largestRectInBand(cd.values, cd.prevStack);
+        if (!coord) return null;
+        const maxVal = Math.max(...cd.values);
+        if (maxVal < 8) return null;
+        return { name: s.name, labelColor, coord };
+      })
+      .filter(Boolean);
+  }, [isRelative, cumulativeData, rawSeriesData, split]);
+
+  const updateGraphicLabels = useCallback(() => {
+    if (!chartRef.current) return;
+    const chart = chartRef.current.getEchartsInstance();
+    if (!isRelative || labelSpecs.length === 0) {
+      chart.setOption({ graphic: { elements: [] } }, { notMerge: false });
+      return;
+    }
+    const labels = labelSpecs.map((spec) => {
+      const [x, y] = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, spec.coord);
+      return {
+        type: 'text',
+        left: x,
+        top: y,
+        style: {
+          text: spec.name,
+          fill: spec.labelColor,
+          fontSize: 10,
+          fontWeight: 500,
+          textAlign: 'center',
+          textVerticalAlign: 'middle',
+        },
+        z: 10,
+        silent: true,
+      };
+    });
+    chart.setOption({ graphic: { elements: labels } }, { notMerge: false });
+  }, [isRelative, labelSpecs]);
+
+  useEffect(() => {
+    const t = setTimeout(updateGraphicLabels, 150);
+    return () => clearTimeout(t);
+  }, [isRelative, labelSpecs, updateGraphicLabels]);
+
+  useEffect(() => {
+    const onResize = () => updateGraphicLabels();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [updateGraphicLabels]);
 
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'shadow' },
+      axisPointer: { type: isRelative ? 'line' : 'shadow' },
       appendToBody: true,
       confine: true,
       formatter: (params) => {
+        const dayIdx = params?.[0]?.dataIndex;
+        const total = dayIdx != null ? dayTotals[dayIdx] : 0;
+        let prevIdx = dayIdx;
+        if (displayMode === 'relative' && total === 0 && dayIdx != null) {
+          for (let k = dayIdx - 1; k >= 0; k--) {
+            if (dayTotals[k] > 0) {
+              prevIdx = k;
+              break;
+            }
+          }
+        }
+        const displayTotal = displayMode === 'relative' && total === 0 ? (dayTotals[prevIdx] ?? 0) : total;
         let html = `<b>${params[0].axisValue}</b><br/>`;
-        let total = 0;
         const sorted = [...params].filter((p) => p.value > 0).sort((a, b) => (b.value || 0) - (a.value || 0));
         for (const p of sorted) {
-          html += `${p.marker} ${p.seriesName}: ${curMetric.fn(p.value)}<br/>`;
-          total += p.value;
+          const rawVal = displayMode === 'relative'
+            ? (rawSeriesData.find((s) => s.name === p.seriesName)?.values[prevIdx] ?? 0)
+            : p.value;
+          if (displayMode === 'relative') {
+            html += `${p.marker} ${p.seriesName}: ${p.value.toFixed(1)}% (${curMetric.fn(rawVal)})<br/>`;
+          } else {
+            html += `${p.marker} ${p.seriesName}: ${curMetric.fn(p.value)}<br/>`;
+          }
         }
-        html += `<b>Total: ${curMetric.fn(total)}</b>`;
+        html += displayMode === 'relative'
+          ? `<b>Total: 100% (${curMetric.fn(displayTotal)})</b>`
+          : `<b>Total: ${curMetric.fn(total)}</b>`;
         return html;
       },
     },
@@ -156,7 +332,16 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
       textStyle: { color: '#484f58' },
     }],
     xAxis: { type: 'category', data: dates, axisLabel: { color: '#484f58', fontSize: 10, rotate: 45 }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#30363d' } } },
-    yAxis: { type: 'value', axisLabel: { formatter: (v) => curMetric.fn(v), color: '#484f58' }, splitLine: { lineStyle: { color: '#21262d' } } },
+    yAxis: {
+      type: 'value',
+      min: displayMode === 'relative' ? 0 : undefined,
+      max: displayMode === 'relative' ? 100 : undefined,
+      axisLabel: {
+        formatter: displayMode === 'relative' ? (v) => v + '%' : (v) => curMetric.fn(v),
+        color: '#484f58',
+      },
+      splitLine: { lineStyle: { color: '#21262d' } },
+    },
     series,
     ...ECHARTS_ANIMATION,
   };
@@ -168,7 +353,6 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
       <div className="section-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span className="section-title">Daily Usage</span>
-          <span className="chart-badge">approximate allocation</span>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <div className="btn-group">
@@ -176,6 +360,9 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
           </div>
           <div className="btn-group">
             {SPLIT_MODES.map((s) => <button key={s.key} className={`btn ${split === s.key ? 'active' : ''}`} onClick={() => setSplit(s.key)}>{s.label}</button>)}
+          </div>
+          <div className="btn-group">
+            {DISPLAY_MODES.map((d) => <button key={d.key} className={`btn ${displayMode === d.key ? 'active' : ''}`} onClick={() => setDisplayMode(d.key)}>{d.label}</button>)}
           </div>
         </div>
       </div>
@@ -188,8 +375,9 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
           option={option}
           style={{ height: 400 }}
           theme="dark"
-          notMerge={true}
+          notMerge={false}
           lazyUpdate={true}
+          onChartReady={updateGraphicLabels}
           onEvents={{
             click: (params) => {
               const date = params?.axisValue || params?.name;
