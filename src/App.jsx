@@ -245,6 +245,8 @@ export default function App() {
 
   const complete = Boolean(progress?.complete && overviewPresentationSettled);
   const pct = Math.round((progress?.percent || 0) * 100);
+  const overviewIngestProgress = Math.min(Math.max(progress?.percent || 0, 0), 1);
+  const overviewIngestActive = Boolean(progress && !progress.complete && progress.phase !== 'error');
 
   useEffect(() => {
     if (!progress?.complete) {
@@ -355,7 +357,20 @@ export default function App() {
         </nav>
 
         <div className="main-content">
-          {tab === 'Overview' && <Overview data={overviewData} heatmap={overviewHeatmap} daily={overviewDaily} families={overviewFamilies} repos={overviewRepos} models={overviewModels} range={range} onPresentationSettledChange={setOverviewPresentationSettled} />}
+          {tab === 'Overview' && (
+            <Overview
+              data={overviewData}
+              heatmap={overviewHeatmap}
+              daily={overviewDaily}
+              families={overviewFamilies}
+              repos={overviewRepos}
+              models={overviewModels}
+              range={range}
+              onPresentationSettledChange={setOverviewPresentationSettled}
+              ingestProgress={overviewIngestProgress}
+              isIngestActive={overviewIngestActive}
+            />
+          )}
           {tab === 'Repos' && <Repos data={data.repos} />}
           {tab === 'Models' && <Models data={data.models} />}
           {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}

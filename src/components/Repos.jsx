@@ -5,7 +5,7 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor } from '../utils/colors';
-import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
+import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/animationsDefault';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);

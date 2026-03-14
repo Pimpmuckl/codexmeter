@@ -1,8 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildOverviewPresentationTarget, interpolateOverviewPresentation } from '../utils/overviewPresentation';
-import { OVERVIEW_PRESENTATION_DURATION_MS } from '../utils/echartsDefaults';
+import {
+  OVERVIEW_PRESENTATION_DURATION_MS,
+  resolveOverviewPresentationDuration,
+  resolveOverviewPresentationEasing,
+} from '../utils/animationsDefault';
 
-export function useAnimatedOverviewPresentation(inputs, duration = OVERVIEW_PRESENTATION_DURATION_MS, onSettledChange) {
+export function useAnimatedOverviewPresentation(
+  inputs,
+  {
+    duration = OVERVIEW_PRESENTATION_DURATION_MS,
+    onSettledChange,
+    ingestProgress = 0,
+    isIngestActive = false,
+  } = {}
+) {
   const target = useMemo(
     () => buildOverviewPresentationTarget(inputs),
     [inputs.overview, inputs.heatmap, inputs.daily, inputs.families, inputs.repos, inputs.models, inputs.range]
@@ -48,7 +60,12 @@ export function useAnimatedOverviewPresentation(inputs, duration = OVERVIEW_PRES
       if (!lastFrameRef.current) lastFrameRef.current = now;
       const dt = Math.max(1, now - lastFrameRef.current);
       lastFrameRef.current = now;
-      const alpha = 1 - Math.exp(-dt / Math.max(duration, 1));
+      const effectiveDuration = resolveOverviewPresentationDuration(ingestProgress, isIngestActive) || duration;
+      const alphaBase = 1 - Math.exp(-dt / Math.max(effectiveDuration, 1));
+      const alpha = applyPresentationEasing(
+        alphaBase,
+        resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
+      );
 
       const latestTarget = targetRef.current;
       const current = currentRef.current;
@@ -74,7 +91,7 @@ export function useAnimatedOverviewPresentation(inputs, duration = OVERVIEW_PRES
     frameRef.current = requestAnimationFrame(step);
 
     return undefined;
-  }, [target, duration]);
+  }, [target, duration, ingestProgress, isIngestActive]);
 
   useEffect(() => () => {
     if (frameRef.current) cancelAnimationFrame(frameRef.current);
@@ -83,6 +100,14 @@ export function useAnimatedOverviewPresentation(inputs, duration = OVERVIEW_PRES
   }, []);
 
   return animated;
+}
+
+function applyPresentationEasing(t, easing) {
+  const x = Math.min(Math.max(t, 0), 1);
+  if (easing === 'cubicOut') {
+    return 1 - Math.pow(1 - x, 3);
+  }
+  return x;
 }
 
 function presentationDistance(current, target) {

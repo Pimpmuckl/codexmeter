@@ -1,5 +1,66 @@
 const AUTO = 'auto';
 
+/**
+ * Overview ingest animation control panel.
+ *
+ * This is the single source of truth for:
+ * - Overview client-side presentation timing
+ * - Overview ECharts timing defaults
+ * - Overview server-side tail pacing
+ *
+ * `speed` scales the main timings:
+ * - `1` = baseline
+ * - `2` = 2x faster
+ * - `0.5` = 2x slower
+ *
+ * Per-chart overrides use:
+ * - `'auto'` to inherit the scaled main value
+ * - a number to force an explicit value in ms
+ */
+export const OVERVIEW_INGEST_ANIMATION = {
+  speed: 1,
+  main: {
+    presentationDurationMs: 190,
+    chartAppearDurationMs: 0,
+    chartUpdateDurationMs: 200,
+    easing: 'linear',
+    easingUpdate: 'linear',
+  },
+  tail: {
+    // Master switch for the end-of-ingest slowdown behavior.
+    enabled: true,
+    // Progress threshold where the tail mode starts, expressed from 0..1.
+    startPercent: 0.85,
+    // Fixed presentation duration in ms during the tail; use AUTO to derive it from main.durationScale.
+    durationMs: AUTO,
+    // Multiplier applied to the normal presentation duration when durationMs is AUTO.
+    durationScale: 100,
+    // Shared easing applied by the Overview presentation animator during the tail.
+    easing: 'cubicOut',
+    // Backend Overview live-update cadence during the tail, in patches per second.
+    overviewHz: 5,
+  },
+  daily: {
+    chartAppearDurationMs: AUTO,
+    chartUpdateDurationMs: 30,
+    easing: AUTO,
+    easingUpdate: AUTO,
+  },
+  bars: {
+    chartAppearDurationMs: AUTO,
+    chartUpdateDurationMs: 20,
+    easing: AUTO,
+    easingUpdate: AUTO,
+  },
+  donuts: {
+    chartAppearDurationMs: AUTO,
+    chartUpdateDurationMs: AUTO,
+    easing: AUTO,
+    easingUpdate: 'linear',
+    seriesAnimation: false,
+  },
+};
+
 /** Shared ECharts animation defaults for non-Overview charts */
 export const ECHARTS_ANIMATION = {
   animationDuration: 750,
@@ -44,49 +105,6 @@ export const ECHARTS_DETAIL_BAR_LABEL_ANIMATION = {
   animationDelayUpdate: 360,
 };
 
-/**
- * Overview ingest animation control panel.
- *
- * `speed` is the generic knob:
- * - `1` = current baseline
- * - `2` = 2x faster
- * - `0.5` = 2x slower
- *
- * Main timings are scaled by `speed`.
- * Per-chart overrides use:
- * - `'auto'` to inherit the scaled main value
- * - a number to force an explicit value in ms
- */
-export const OVERVIEW_INGEST_ANIMATION = {
-  speed: 1,
-  main: {
-    presentationDurationMs: 190,
-    chartAppearDurationMs: 0,
-    chartUpdateDurationMs: 200,
-    easing: 'linear',
-    easingUpdate: 'linear',
-  },
-  daily: {
-    chartAppearDurationMs: AUTO,
-    chartUpdateDurationMs: 30,
-    easing: AUTO,
-    easingUpdate: AUTO,
-  },
-  bars: {
-    chartAppearDurationMs: AUTO,
-    chartUpdateDurationMs: 20,
-    easing: AUTO,
-    easingUpdate: AUTO,
-  },
-  donuts: {
-    chartAppearDurationMs: AUTO,
-    chartUpdateDurationMs: AUTO,
-    easing: AUTO,
-    easingUpdate: 'linear', 
-    seriesAnimation: false,
-  },
-};
-
 function safeSpeed(value) {
   return Number.isFinite(value) && value > 0 ? value : 1;
 }
@@ -129,6 +147,35 @@ export const OVERVIEW_PRESENTATION_DURATION_MS = scaledMainDuration(
   OVERVIEW_INGEST_ANIMATION.main.presentationDurationMs
 );
 
+export function resolveOverviewPresentationDuration(progress = 0, isIngestActive = false) {
+  const base = OVERVIEW_PRESENTATION_DURATION_MS;
+  const tail = OVERVIEW_INGEST_ANIMATION.tail;
+
+  if (!isIngestActive || !tail?.enabled) return base;
+
+  const start = Math.min(Math.max(tail.startPercent ?? 0.9, 0), 0.999);
+  const clampedProgress = Math.min(Math.max(progress || 0, 0), 1);
+  if (clampedProgress <= start) return base;
+
+  const normalized = (clampedProgress - start) / Math.max(1 - start, 0.001);
+  const durationTarget = tail.durationMs === AUTO
+    ? Math.round(base * Math.max(tail.durationScale || 1, 1))
+    : tail.durationMs;
+
+  return Math.round(base + (durationTarget - base) * cubicOut(normalized));
+}
+
+export function resolveOverviewPresentationEasing(progress = 0, isIngestActive = false) {
+  const tail = OVERVIEW_INGEST_ANIMATION.tail;
+  if (!isIngestActive || !tail?.enabled) return 'linear';
+
+  const start = Math.min(Math.max(tail.startPercent ?? 0.9, 0), 0.999);
+  const clampedProgress = Math.min(Math.max(progress || 0, 0), 1);
+  if (clampedProgress <= start) return 'linear';
+
+  return tail.easing || 'cubicOut';
+}
+
 /** Overview page - resolved main animation config */
 export const ECHARTS_OVERVIEW_ANIMATION = buildOverviewChartAnimation({
   chartAppearDurationMs: AUTO,
@@ -156,3 +203,8 @@ export const ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION =
   OVERVIEW_INGEST_ANIMATION.donuts.seriesAnimation;
 
 export { AUTO as OVERVIEW_ANIMATION_AUTO };
+
+function cubicOut(t) {
+  const x = Math.min(Math.max(t, 0), 1);
+  return 1 - Math.pow(1 - x, 3);
+}

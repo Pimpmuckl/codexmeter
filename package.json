@@ -9,6 +9,7 @@
   "files": [
     "bin",
     "server",
+    "src/utils/animationsDefault.js",
     "dist",
     "README.md",
     "package.json"

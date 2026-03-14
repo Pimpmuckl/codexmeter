@@ -9,6 +9,7 @@ import { buildAggregates, buildSessionView } from './aggregator.js';
 import { createDayKeyFormatter } from './day-key.js';
 import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap, buildLivePatch } from './live-state.js';
 import { createRolloutWorkerPool } from './rollout-worker-pool.js';
+import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 
 const LIVE_FRAME_INTERVAL_MS = 50;
 const LIVE_DAYS_PER_SECOND = 6;
@@ -519,7 +520,19 @@ function takeFlushablePatch(state) {
 }
 
 function readyForOverview(state, now) {
-  return (now - state.live_last_overview_emit_at) >= LIVE_OVERVIEW_CADENCE_MS;
+  return (now - state.live_last_overview_emit_at) >= getOverviewCadenceMs(state);
+}
+
+function getOverviewCadenceMs(state) {
+  const tail = OVERVIEW_INGEST_ANIMATION.tail;
+  const tailStartPercent = Math.min(Math.max(tail?.startPercent ?? 0.95, 0), 0.999);
+  const tailHz = Number.isFinite(tail?.overviewHz) && tail.overviewHz > 0 ? tail.overviewHz : 5;
+  const tailCadenceMs = Math.round(1000 / tailHz);
+
+  if (tail?.enabled && (state.presentation_complete_pending || (state.percent || 0) >= tailStartPercent)) {
+    return tailCadenceMs;
+  }
+  return LIVE_OVERVIEW_CADENCE_MS;
 }
 
 function moveSet(from, to) {

@@ -11,7 +11,7 @@ import {
   ECHARTS_OVERVIEW_DONUTS,
   ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
   OVERVIEW_PRESENTATION_DURATION_MS,
-} from '../utils/echartsDefaults';
+} from '../utils/animationsDefault';
 import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
@@ -179,11 +179,26 @@ function Heatmap({ heatmapData }) {
   );
 }
 
-function Overview({ data, heatmap, daily, families, repos, models, range = 'total', onPresentationSettledChange = null }) {
+function Overview({
+  data,
+  heatmap,
+  daily,
+  families,
+  repos,
+  models,
+  range = 'total',
+  onPresentationSettledChange = null,
+  ingestProgress = 0,
+  isIngestActive = false,
+}) {
   const presentation = useAnimatedOverviewPresentation(
     { overview: data, heatmap, daily, families, repos, models, range },
-    OVERVIEW_PRESENTATION_DURATION_MS,
-    onPresentationSettledChange
+    {
+      duration: OVERVIEW_PRESENTATION_DURATION_MS,
+      onSettledChange: onPresentationSettledChange,
+      ingestProgress,
+      isIngestActive,
+    }
   );
 
   if (!presentation.ready) return null;
@@ -391,7 +406,9 @@ function areOverviewPropsEqual(prev, next) {
     && prev.repos === next.repos
     && prev.models === next.models
     && prev.range === next.range
-    && prev.onPresentationSettledChange === next.onPresentationSettledChange;
+    && prev.onPresentationSettledChange === next.onPresentationSettledChange
+    && prev.ingestProgress === next.ingestProgress
+    && prev.isIngestActive === next.isIngestActive;
 }
 
 export default memo(Overview, areOverviewPropsEqual);

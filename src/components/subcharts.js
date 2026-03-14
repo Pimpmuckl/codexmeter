@@ -1,4 +1,4 @@
-import { ECHARTS_ANIMATION, ECHARTS_DONUT_ANIMATION, ECHARTS_DETAIL_BAR_ANIMATION, ECHARTS_LABEL_ANIMATION, ECHARTS_DETAIL_BAR_LABEL_ANIMATION } from '../utils/echartsDefaults';
+import { ECHARTS_ANIMATION, ECHARTS_DONUT_ANIMATION, ECHARTS_DETAIL_BAR_ANIMATION, ECHARTS_LABEL_ANIMATION, ECHARTS_DETAIL_BAR_LABEL_ANIMATION } from '../utils/animationsDefault';
 
 export function resolveSubchartMode(chartMode, defaultMode) {
   return chartMode === 'default' ? defaultMode : chartMode;
