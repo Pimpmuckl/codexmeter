@@ -66,6 +66,10 @@ export const OVERVIEW_INGEST_ANIMATION = {
     settleThreshold: 0.998,
     /** Min relative intensity rise (0–1) to trigger pop – e.g. 0.08 = cell turning white */
     intensityRiseThreshold: 0.08,
+    /** Relative intensity (0–1) that counts as "white" – crossing this triggers pop */
+    whiteThreshold: 0.88,
+    /** Cell is "new winner" if val >= maxVal * this when max increased */
+    nearMaxRatio: 0.985,
   },
 };
 

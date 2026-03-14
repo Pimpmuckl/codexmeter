@@ -165,9 +165,11 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
     const prevMaxVal = prevMaxValRef.current;
     const up = new Set();
     const down = new Set();
-    const tol = Math.max(0.5, prevMaxVal * 0.001);
+    const tol = Math.max(0.05, Math.min(prevMaxVal, maxVal) * 0.002);
     const intensityDropThreshold = 0.02;
     const intensityRiseThreshold = OVERVIEW_INGEST_ANIMATION.heatmap?.intensityRiseThreshold ?? 0.08;
+    const whiteThreshold = OVERVIEW_INGEST_ANIMATION.heatmap?.whiteThreshold ?? 0.88;
+    const nearMaxRatio = OVERVIEW_INGEST_ANIMATION.heatmap?.nearMaxRatio ?? 0.985;
     for (let i = 364; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
@@ -177,10 +179,14 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
       const pVal = p ?? 0;
       const prevT = prevMaxVal > 0 ? pVal / prevMaxVal : 0;
       const currT = maxVal > 0 ? val / maxVal : 0;
-      const isNewWinner = val >= maxVal - tol && maxVal > prevMaxVal + tol && pVal < maxVal - tol;
-      if (isNewWinner || val > pVal + tol) {
-        up.add(key);
-      } else if (currT > prevT + intensityRiseThreshold) {
+      const isNewWinner =
+        maxVal > prevMaxVal + tol &&
+        val >= maxVal * nearMaxRatio &&
+        (pVal < maxVal * nearMaxRatio || pVal === undefined);
+      const crossedIntoWhite = currT >= whiteThreshold && prevT < whiteThreshold;
+      const valueIncreased = val > pVal + tol;
+      const intensityRose = currT > prevT + intensityRiseThreshold;
+      if (isNewWinner || crossedIntoWhite || valueIncreased || intensityRose) {
         up.add(key);
       } else if (val < pVal - tol) {
         down.add(key);
@@ -203,11 +209,12 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
 
   function intensity(v) {
     if (v === 0) return 'var(--bg-elevated)';
-    const t = Math.min(v / maxVal, 1);
-    if (t < 0.15) return 'rgba(99, 102, 241, 0.4)';
-    if (t < 0.4) return 'rgba(99, 102, 241, 0.6)';
-    if (t < 0.7) return 'rgba(99, 102, 241, 0.85)';
-    if (t < 1) return 'rgba(99, 102, 241, 0.95)';
+    const t = v / maxVal;
+    const q = 1 / 4;
+    if (t < q) return 'rgba(99, 102, 241, 0.14)';
+    if (t < 2 * q) return 'rgba(99, 102, 241, 0.38)';
+    if (t < 3 * q) return 'rgba(99, 102, 241, 0.62)';
+    if (t < 1) return 'rgba(99, 102, 241, 0.88)';
     return '#fff';
   }
 
