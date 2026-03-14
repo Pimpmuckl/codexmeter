@@ -21,6 +21,11 @@ function fmtDate(ts) {
   return new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
 }
 
+function dayFloor(ts) {
+  if (!Number.isFinite(ts) || ts <= 0) return 0;
+  return Math.floor(ts / 86400) * 86400;
+}
+
 const PHASE_LABELS = {
   idle: 'Starting...',
   inventory: 'Reading threads',
@@ -54,7 +59,10 @@ export default function App() {
   const [completionPresentationPending, setCompletionPresentationPending] = useState(false);
   const [exportJob, setExportJob] = useState(null);
   const [startingExport, setStartingExport] = useState(false);
+  const [displayDateRange, setDisplayDateRange] = useState(null);
   const prevBackendCompleteRef = useRef(false);
+  const displayDateAnimationRef = useRef(0);
+  const lastAutoDownloadedExportIdRef = useRef(null);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -99,6 +107,13 @@ export default function App() {
 
   const handleDownloadOverviewVideo = useCallback(() => {
     if (!exportJob?.id || exportJob.status !== 'complete') return;
+    window.location.href = api.url(`/api/export/${encodeURIComponent(exportJob.id)}/file`);
+  }, [exportJob]);
+
+  useEffect(() => {
+    if (!exportJob?.id || exportJob.status !== 'complete') return;
+    if (lastAutoDownloadedExportIdRef.current === exportJob.id) return;
+    lastAutoDownloadedExportIdRef.current = exportJob.id;
     window.location.href = api.url(`/api/export/${encodeURIComponent(exportJob.id)}/file`);
   }, [exportJob]);
 
@@ -367,6 +382,66 @@ export default function App() {
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
   const dateRange = d?.date_range;
+
+  useEffect(() => {
+    if (displayDateAnimationRef.current) {
+      cancelAnimationFrame(displayDateAnimationRef.current);
+      displayDateAnimationRef.current = 0;
+    }
+
+    if (!dateRange?.from || !dateRange?.to) {
+      setDisplayDateRange(null);
+      return undefined;
+    }
+
+    const nextRange = {
+      from: dayFloor(dateRange.from),
+      to: dayFloor(dateRange.to),
+    };
+
+    setDisplayDateRange((prev) => {
+      if (
+        !prev ||
+        backendComplete ||
+        prev.from !== nextRange.from ||
+        nextRange.to <= prev.to
+      ) {
+        return nextRange;
+      }
+
+      const start = prev.to;
+      const end = nextRange.to;
+      const diffDays = Math.max(1, Math.round((end - start) / 86400));
+      const durationMs = Math.min(1400, Math.max(320, diffDays * 110));
+      const startedAt = performance.now();
+
+      const tick = (now) => {
+        const t = Math.min(1, (now - startedAt) / durationMs);
+        const interpolated = dayFloor(start + (end - start) * t);
+        setDisplayDateRange((current) => {
+          if (!current || current.from !== nextRange.from) return current;
+          if (interpolated <= current.to) return current;
+          return { ...current, to: interpolated };
+        });
+        if (t < 1) {
+          displayDateAnimationRef.current = requestAnimationFrame(tick);
+        } else {
+          displayDateAnimationRef.current = 0;
+          setDisplayDateRange(nextRange);
+        }
+      };
+
+      displayDateAnimationRef.current = requestAnimationFrame(tick);
+      return prev;
+    });
+
+    return () => {
+      if (displayDateAnimationRef.current) {
+        cancelAnimationFrame(displayDateAnimationRef.current);
+        displayDateAnimationRef.current = 0;
+      }
+    };
+  }, [backendComplete, dateRange?.from, dateRange?.to]);
   const exportBusy = startingExport || ['queued', 'running'].includes(exportJob?.status);
   const exportLabel = exportJob?.status === 'complete'
     ? 'Download MP4'
@@ -413,18 +488,10 @@ export default function App() {
             ))}
           </div>
           <div className="navbar-meta">
-            {(visibleIngesting || !ingestFadeDone) && (
-              <div className={`navbar-ingest-wrap ${ingestFadeOut ? 'navbar-ingest-fade-out' : ''}`}>
-                <div className="navbar-progress-wrap">
-                  <div className="navbar-progress-bar" style={{ width: `${pct}%` }} />
-                </div>
-                <span className="incomplete-badge ingesting-badge">ingesting <span className="ingesting-pct">{pct}%</span></span>
-              </div>
-            )}
             {dateRange && (
               <div className={`navbar-date-wrap ${!backendComplete ? 'navbar-date-wrap-dimmed' : ''}`}>
                 <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                  {fmtDate(dateRange.from)} — {fmtDate(dateRange.to)}
+                  {fmtDate(displayDateRange?.from || dateRange.from)} — {fmtDate(displayDateRange?.to || dateRange.to)}
                 </span>
                 <div className="range-toggle">
                   {RANGES.map(r => (
