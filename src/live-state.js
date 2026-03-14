@@ -92,3 +92,16 @@ export function buildLiveDataEnvelope(liveState, progress) {
     },
   };
 }
+
+export function buildLiveStateFromSettled(data, ingestId, seq = 0) {
+  const next = createEmptyLiveClientState();
+  next.ingest_id = ingestId || null;
+  next.seq = seq;
+  next.overview = data?.overview?.data || next.overview;
+  next.repos = data?.repos?.data || next.repos;
+  next.models = data?.models?.data || next.models;
+  next.families = data?.families?.data || next.families;
+  next.daily = Object.fromEntries((data?.daily?.data || []).map((entry) => [entry.date, { ...entry }]));
+  next.heatmap = data?.heatmap?.data || next.heatmap;
+  return next;
+}

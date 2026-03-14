@@ -54,6 +54,7 @@ export function buildDistributionOption({
       tooltip: {
         trigger: 'item',
         appendToBody: true,
+        confine: true,
         formatter: (p) => `${p.name}: ${valueFormatter(p.value)} (${p.percent}%)`,
       },
       series: [{
@@ -93,6 +94,7 @@ export function buildDistributionOption({
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       appendToBody: true,
+      confine: true,
       formatter: (params) => {
         const idx = params?.[0]?.dataIndex;
         const row = reversed[idx];

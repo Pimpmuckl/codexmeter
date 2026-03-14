@@ -243,6 +243,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       appendToBody: true,
+      confine: true,
       formatter: params => params?.length ? `${params[0].axisValue}: ${fmt(params[0].value)} tokens` : '',
     },
     grid: { left: 100, right: 5, top: 5, bottom: 5 },
@@ -290,6 +291,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     tooltip: {
       trigger: 'item',
       appendToBody: true,
+      confine: true,
       formatter: p => `${p.name}: ${fmt(p.value)} tokens (${p.percent}%)`,
     },
     series: [{
@@ -321,6 +323,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     tooltip: {
       trigger: 'item',
       appendToBody: true,
+      confine: true,
       formatter: p => `${p.name}: ${fmt(p.value)} tokens (${p.percent}%)`,
     },
     series: [{

@@ -5,7 +5,7 @@ import Repos from './components/Repos';
 import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
-import { buildLiveDataEnvelope, mergeLiveEvent } from './live-state';
+import { buildLiveDataEnvelope, buildLiveStateFromSettled, mergeLiveEvent } from './live-state';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
@@ -26,6 +26,7 @@ const PHASE_LABELS = {
   normalizing: 'Normalizing',
   enrichment: 'Enriching rollouts',
   aggregation: 'Building aggregates',
+  finalizing: 'Finalizing view',
   complete: 'Complete',
   error: 'Error',
 };
@@ -48,9 +49,12 @@ export default function App() {
         api.overview(), api.repos(), api.models(), api.daily(),
         api.sessions(), api.heatmap(), api.families(),
       ]);
-      setData({ overview, repos, models, daily, sessions, heatmap, families });
+      const nextData = { overview, repos, models, daily, sessions, heatmap, families };
+      setData(nextData);
+      return nextData;
     } catch (err) {
       console.error('Fetch error:', err);
+      throw err;
     }
   }, []);
 
@@ -73,6 +77,7 @@ export default function App() {
     let source = null;
     let usingFallback = false;
     let terminalSseState = false;
+    let settledFetchStarted = false;
     let queuedEvents = [];
     let frameId = 0;
     let liveStateRef = null;
@@ -112,6 +117,20 @@ export default function App() {
       if (!frameId) {
         frameId = requestAnimationFrame(flushQueuedEvents);
       }
+    };
+
+    const ensureSettledDataLoaded = async (nextProgress, ingestId = null) => {
+      if (!alive || !nextProgress?.complete || settledFetchStarted) return;
+      settledFetchStarted = true;
+      const settledData = await fetchAll();
+      if (!alive || !settledData) return;
+      const hydratedLiveState = buildLiveStateFromSettled(
+        settledData,
+        liveStateRef?.ingest_id || ingestId || null,
+        liveStateRef?.seq || 0
+      );
+      liveStateRef = hydratedLiveState;
+      setLiveState(hydratedLiveState);
     };
 
     const startFallbackPolling = () => {
@@ -158,12 +177,20 @@ export default function App() {
         if (!alive) return;
         const payload = JSON.parse(event.data);
         enqueueLivePayload(payload, 'bootstrap');
+        ensureSettledDataLoaded(payload.progress, payload.ingest_id).catch((err) => {
+          console.error('Settled fetch error:', err);
+          settledFetchStarted = false;
+        });
       });
 
       source.addEventListener('progress', (event) => {
         if (!alive) return;
         const payload = JSON.parse(event.data);
         enqueueLivePayload(payload, 'progress', true);
+        ensureSettledDataLoaded(payload.progress, payload.ingest_id).catch((err) => {
+          console.error('Settled fetch error:', err);
+          settledFetchStarted = false;
+        });
       });
 
       source.addEventListener('patch', (event) => {
@@ -176,8 +203,8 @@ export default function App() {
         if (!alive) return;
         const payload = JSON.parse(event.data);
         terminalSseState = true;
-        enqueueLivePayload(payload, 'patch');
-        await fetchAll();
+        enqueueLivePayload(payload, 'progress', true);
+        await ensureSettledDataLoaded(payload.progress, payload.ingest_id);
         if (!alive) return;
         source?.close();
       });

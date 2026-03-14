@@ -131,7 +131,7 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       appendToBody: true,
-      //confine:true,
+      confine: true,
       formatter: (params) => {
         let html = `<b>${params[0].axisValue}</b><br/>`;
         let total = 0;

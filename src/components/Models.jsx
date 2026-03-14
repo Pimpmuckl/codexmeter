@@ -162,7 +162,7 @@ export default function Models({ data, chartMode = 'default' }) {
   const option = {
     backgroundColor: 'transparent',
     ...ECHARTS_ANIMATION,
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, appendToBody: true, formatter: p => {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, appendToBody: true, confine: true, formatter: p => {
       const m = models[models.length - 1 - p[0].dataIndex];
       return `<b>${m.model_name}</b><br/>Tokens: ${fmt(m.tokens)}<br/>Cost: ${fmtCost(m.cost)}<br/>Sessions: ${m.sessions}`;
     }},

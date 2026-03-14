@@ -137,6 +137,7 @@ export default function Repos({ data, chartMode = 'default' }) {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       appendToBody: true,
+      confine: true,
       formatter: (p) => {
         const repo = top[top.length - 1 - p[0].dataIndex];
         return repo ? `<b>${repo.repo_label}</b><br/>Tokens: ${fmt(repo.tokens)}<br/>Cost: ${fmtCost(repo.cost)}<br/>Sessions: ${repo.sessions}` : '';

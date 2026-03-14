@@ -1,7 +1,7 @@
 /** Shared ECharts animation defaults - faster than ECharts default (1000ms) */
 export const ECHARTS_ANIMATION = {
   animationDuration: 750,
-  animationDurationUpdate: 120,
+  animationDurationUpdate: 220,
   animationEasing: 'cubicOut',
   animationEasingUpdate: 'cubicOut',
 };
@@ -20,7 +20,7 @@ export const ECHARTS_LABEL_ANIMATION = {
 /** Detail donut charts (Repos/Models/Daily) - same as bar, shared config */
 export const ECHARTS_DONUT_ANIMATION = {  
   ...ECHARTS_ANIMATION,
-  animationDurationUpdate: 100,
+  animationDurationUpdate: 200,
   animationDelayUpdate: 0,
   animationEasingUpdate: 'cubicOut',
 };

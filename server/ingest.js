@@ -11,11 +11,14 @@ import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState
 import { createRolloutWorkerPool } from './rollout-worker-pool.js';
 
 const LIVE_FRAME_INTERVAL_MS = 50;
+const LIVE_DAYS_PER_SECOND = 6;
+const LIVE_DAY_CADENCE_MS = Math.round(1000 / LIVE_DAYS_PER_SECOND);
+const LIVE_DAY_KEYS_PER_EMIT = 1;
 const LIVE_SURFACE_CADENCE_MS = {
-  overview: LIVE_FRAME_INTERVAL_MS,
-  rankings: LIVE_FRAME_INTERVAL_MS * 2,
-  daily: LIVE_FRAME_INTERVAL_MS * 3,
-  heatmap: LIVE_FRAME_INTERVAL_MS * 3,
+  overview: LIVE_FRAME_INTERVAL_MS * 2,
+  rankings: LIVE_FRAME_INTERVAL_MS * 3,
+  daily: LIVE_DAY_CADENCE_MS,
+  heatmap: LIVE_DAY_CADENCE_MS,
 };
 
 export function createIngestState() {
@@ -34,6 +37,7 @@ export function createIngestState() {
     sessions: [],
     aggregates: null,
     generated_at: null,
+    presentation_complete_pending: false,
     live_state: null,
     live_seq: 0,
     live_subscribers: new Set(),
@@ -200,12 +204,13 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     rebuildAggregates(sessions, state, opts, tz);
     if (!isCurrentRun()) return;
-    state.percent = 1;
-    state.phase = 'complete';
-    state.complete = true;
+    state.percent = 0.99;
+    state.phase = 'finalizing';
+    state.complete = false;
+    state.presentation_complete_pending = true;
     state.current_date_bucket = null;
     queueLiveProgress(state);
-    flushLive(state, 'complete');
+    finalizeWithoutSubscribers(state);
 
   } catch (err) {
     if (!isCurrentRun()) return;
@@ -238,6 +243,7 @@ export function restartIngest(codexHome, state, opts = {}) {
   state.sessions = [];
   state.aggregates = null;
   state.generated_at = null;
+  state.presentation_complete_pending = false;
   state.live_state = null;
   state.live_seq = 0;
   state.live_pending_patch = createEmptyLivePatch();
@@ -367,6 +373,18 @@ function stopLivePumpIfIdle(state) {
   if (state.live_subscribers.size) return;
   clearInterval(state.live_pump_timer);
   state.live_pump_timer = null;
+  finalizeWithoutSubscribers(state);
+}
+
+function finalizeWithoutSubscribers(state) {
+  if (state.live_subscribers.size) return;
+  if (!state.presentation_complete_pending) return;
+  state.phase = 'complete';
+  state.percent = 1;
+  state.complete = true;
+  state.presentation_complete_pending = false;
+  state.live_progress_dirty = false;
+  state.live_pending_patch = createEmptyLivePatch();
 }
 
 function flushLive(state, forcedEvent = null) {
@@ -385,9 +403,19 @@ function flushLive(state, forcedEvent = null) {
     }
   }
 
-  const flushablePatch = forcedEvent ? state.live_pending_patch : takeFlushablePatch(state);
+  const flushablePatch = forcedEvent ? takeAllPendingPatch(state) : takeFlushablePatch(state);
   const patchEmpty = isPatchEmpty(flushablePatch);
-  const event = forcedEvent || (!patchEmpty ? 'patch' : 'progress');
+  const pendingPatchEmpty = isPatchEmpty(state.live_pending_patch);
+  const shouldEmitComplete = !forcedEvent && patchEmpty && pendingPatchEmpty && state.presentation_complete_pending;
+  const event = forcedEvent || (shouldEmitComplete ? 'complete' : (!patchEmpty ? 'patch' : 'progress'));
+
+  if (shouldEmitComplete) {
+    state.phase = 'complete';
+    state.percent = 1;
+    state.complete = true;
+    state.presentation_complete_pending = false;
+  }
+
   const payload = {
     ingest_id: state.ingest_id,
     seq: ++state.live_seq,
@@ -396,13 +424,13 @@ function flushLive(state, forcedEvent = null) {
 
   if (event === 'patch') {
     payload.data = buildLivePatch(state.live_state, flushablePatch);
-  } else if (event === 'complete' || event === 'bootstrap') {
+  } else if (event === 'bootstrap') {
     payload.data = buildLiveBootstrap(state.live_state);
   }
 
   broadcastLive(state, event, payload);
   state.live_last_emit_at = Date.now();
-  state.live_progress_dirty = false;
+  state.live_progress_dirty = shouldEmitComplete ? false : (event === 'progress' ? false : state.live_progress_dirty);
   if (forcedEvent) {
     state.live_pending_patch = createEmptyLivePatch();
   }
@@ -464,13 +492,16 @@ function takeFlushablePatch(state) {
     state.live_last_surface_emit_at.rankings = now;
   }
 
-  if (state.live_pending_patch.daily.size > 0 && readyForSurface(state, 'daily', now)) {
-    moveSet(state.live_pending_patch.daily, sent.daily);
+  const dayDirty = state.live_pending_patch.daily.size > 0 || state.live_pending_patch.heatmap.size > 0;
+  if (dayDirty && readyForSurface(state, 'daily', now)) {
+    const nextDayKeys = takeNextChronologicalDayKeys(
+      state.live_pending_patch.daily,
+      state.live_pending_patch.heatmap,
+      LIVE_DAY_KEYS_PER_EMIT
+    );
+    moveSpecificKeys(state.live_pending_patch.daily, sent.daily, nextDayKeys);
+    moveSpecificKeys(state.live_pending_patch.heatmap, sent.heatmap, nextDayKeys);
     state.live_last_surface_emit_at.daily = now;
-  }
-
-  if (state.live_pending_patch.heatmap.size > 0 && readyForSurface(state, 'heatmap', now)) {
-    moveSet(state.live_pending_patch.heatmap, sent.heatmap);
     state.live_last_surface_emit_at.heatmap = now;
   }
 
@@ -490,6 +521,32 @@ function moveRangeSets(fromRanges, toRanges) {
   for (const rangeKey of ['total', 'd7', 'd30']) {
     moveSet(fromRanges[rangeKey], toRanges[rangeKey]);
   }
+}
+
+function takeAllPendingPatch(state) {
+  const sent = createEmptyLivePatch();
+  moveSet(state.live_pending_patch.overview, sent.overview);
+  moveRangeSets(state.live_pending_patch.repos, sent.repos);
+  moveRangeSets(state.live_pending_patch.models, sent.models);
+  moveRangeSets(state.live_pending_patch.families, sent.families);
+  moveSet(state.live_pending_patch.daily, sent.daily);
+  moveSet(state.live_pending_patch.heatmap, sent.heatmap);
+  return sent;
+}
+
+function moveSpecificKeys(from, to, keys) {
+  for (const key of keys) {
+    if (!from.has(key)) continue;
+    from.delete(key);
+    to.add(key);
+  }
+}
+
+function takeNextChronologicalDayKeys(dailySet, heatmapSet, limit) {
+  const allKeys = new Set([...dailySet, ...heatmapSet]);
+  return [...allKeys]
+    .sort((a, b) => String(a).localeCompare(String(b)))
+    .slice(0, limit);
 }
 
 function progressPayload(state) {
@@ -534,3 +591,5 @@ function broadcastBootstrap(state) {
   };
   broadcastLive(state, 'bootstrap', payload);
 }
+
+
