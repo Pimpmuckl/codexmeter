@@ -19,11 +19,13 @@
   - backend live aggregate accumulator and `/api/live` SSE stream
   - client live-state merge path in `App.jsx`
   - smoother counter interpolation and slower ECharts update timing
+  - top-right icon-only rerun button wired to `POST /api/rerun`
+  - backend rerun safety via `run_token` invalidation and fresh SSE bootstrap
 - Validated:
   - `npm run build` passes
   - `/api/live` streams `bootstrap` and `patch` events during ingest
   - Vite `/api/progress` still returns `200` through the dev proxy
+  - `/api/rerun` returns `202` with a new `ingest_id`
 - Next:
-  - checkpoint this as phase 1
-  - slim live patch payloads for smoother perceived motion
-  - explore cadence shaping / staggered patch flush timing after payload trimming
+  - payload slimming and cadence shaping are now in progress for phase 2
+  - next likely bottleneck is ECharts render cost rather than transport size

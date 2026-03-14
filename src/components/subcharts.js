@@ -58,6 +58,7 @@ export function buildDistributionOption({
       },
       series: [{
         type: 'pie',
+        ...ECHARTS_DONUT_ANIMATION,
         radius: ['40%', '62%'],
         center: ['50%', '52%'],
         label: { show: true, color: '#8b949e', fontSize: 10, formatter: '{b}', overflow: 'truncate', width: 90, ...ECHARTS_LABEL_ANIMATION },

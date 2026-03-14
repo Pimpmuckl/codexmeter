@@ -68,9 +68,9 @@ export function applySessionToLiveState(live, session, patch) {
 export function buildLiveBootstrap(live) {
   return {
     overview: serializeOverview(live),
-    repos: serializeRangeMaps(live.repos),
-    models: serializeRangeMaps(live.models),
-    families: serializeRangeMaps(live.families),
+    repos: serializeTopRanges(live.repos, serializeRepoSummary),
+    models: serializeTopRanges(live.models, serializeModelSummary),
+    families: serializeTopRanges(live.families, serializeFamilySummary),
     daily: serializeDaily(live.daily),
     heatmap: serializeHeatmap(live.heatmap),
   };
@@ -81,9 +81,9 @@ export function buildLivePatch(live, patch) {
     overview: Object.fromEntries(
       [...patch.overview].map((rangeKey) => [rangeKey, serializeOverviewBucket(live.overview[rangeKey])])
     ),
-    repos: serializePatchedRangeMaps(live.repos, patch.repos),
-    models: serializePatchedRangeMaps(live.models, patch.models),
-    families: serializePatchedRangeMaps(live.families, patch.families),
+    repos: serializePatchedTopRanges(live.repos, patch.repos, serializeRepoSummary),
+    models: serializePatchedTopRanges(live.models, patch.models, serializeModelSummary),
+    families: serializePatchedTopRanges(live.families, patch.families, serializeFamilySummary),
     daily: Object.fromEntries([...patch.daily].map((dayKey) => [dayKey, serializeDailyEntry(live.daily.get(dayKey))])),
     heatmap: Object.fromEntries([...patch.heatmap].map((dayKey) => [dayKey, serializeHeatmapEntry(live.heatmap.get(dayKey))])),
   };
@@ -356,28 +356,29 @@ function serializeOverviewBucket(bucket) {
   };
 }
 
-function serializeRangeMaps(rangeMaps) {
+function serializeTopRanges(rangeMaps, projector) {
   return {
-    total: serializeMap(rangeMaps.total),
-    d7: serializeMap(rangeMaps.d7),
-    d30: serializeMap(rangeMaps.d30),
+    total: serializeTopRange(rangeMaps.total, projector),
+    d7: serializeTopRange(rangeMaps.d7, projector),
+    d30: serializeTopRange(rangeMaps.d30, projector),
   };
 }
 
-function serializePatchedRangeMaps(rangeMaps, dirtyRanges) {
-  return {
-    total: serializeMapEntries(rangeMaps.total, dirtyRanges.total),
-    d7: serializeMapEntries(rangeMaps.d7, dirtyRanges.d7),
-    d30: serializeMapEntries(rangeMaps.d30, dirtyRanges.d30),
-  };
+function serializePatchedTopRanges(rangeMaps, dirtyRanges, projector) {
+  const out = {};
+  for (const rangeKey of ['total', 'd7', 'd30']) {
+    if (dirtyRanges[rangeKey].size > 0) {
+      out[rangeKey] = serializeTopRange(rangeMaps[rangeKey], projector);
+    }
+  }
+  return out;
 }
 
-function serializeMap(map) {
-  return Object.fromEntries([...map.entries()].map(([key, value]) => [key, deepClone(value)]));
-}
-
-function serializeMapEntries(map, dirtySet) {
-  return Object.fromEntries([...dirtySet].map((key) => [key, deepClone(map.get(key))]));
+function serializeTopRange(map, projector, limit = 6) {
+  return [...map.values()]
+    .sort((a, b) => (b?.tokens || 0) - (a?.tokens || 0))
+    .slice(0, limit)
+    .map(projector);
 }
 
 function serializeDaily(dayMap) {
@@ -391,8 +392,6 @@ function serializeDailyEntry(value) {
     elapsed_seconds: Math.round(value?.elapsed_seconds || 0),
     sessions: value?.sessions || 0,
     by_model: deepRoundClone(value?.by_model || {}, ['tokens', 'cost', 'elapsed_seconds']),
-    by_family: deepRoundClone(value?.by_family || {}, ['tokens', 'cost', 'sessions']),
-    by_repo: deepRoundClone(value?.by_repo || {}, ['tokens', 'cost', 'sessions']),
     approximate: true,
   };
 }
@@ -424,6 +423,42 @@ function deepRoundClone(source, numericKeys) {
 
 function deepClone(value) {
   return value ? JSON.parse(JSON.stringify(value)) : value;
+}
+
+function serializeRepoSummary(value) {
+  return {
+    repo_key: value.repo_key,
+    repo_label: value.repo_label,
+    tokens: value.tokens,
+    cost: value.cost,
+    cost_known: value.cost_known,
+    exact_priced: value.exact_priced,
+    heuristic_priced: value.heuristic_priced,
+    sessions: value.sessions,
+  };
+}
+
+function serializeModelSummary(value) {
+  return {
+    model_name: value.model_name,
+    tokens: value.tokens,
+    cost: value.cost,
+    cost_known: value.cost_known,
+    exact_priced: value.exact_priced,
+    heuristic_priced: value.heuristic_priced,
+    sessions: value.sessions,
+  };
+}
+
+function serializeFamilySummary(value) {
+  return {
+    family: value.family,
+    tokens: value.tokens,
+    cost: value.cost,
+    exact_priced: value.exact_priced,
+    heuristic_priced: value.heuristic_priced,
+    sessions: value.sessions,
+  };
 }
 
 function overlapsLowerBound(session, lowerBound) {

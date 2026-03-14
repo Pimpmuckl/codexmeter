@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { attachLiveSubscriber, createIngestState, detachLiveSubscriber, runIngest } from './ingest.js';
+import { attachLiveSubscriber, createIngestState, detachLiveSubscriber, restartIngest, runIngest } from './ingest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10,6 +10,7 @@ export function createServer(codexHome, opts = {}) {
   const state = createIngestState();
   const distDir = path.join(__dirname, '..', 'dist');
   const apiOnly = opts.devApiOnly === true;
+  const ingestOpts = { ...opts };
 
   if (!apiOnly) {
     app.use(express.static(distDir));
@@ -48,6 +49,14 @@ export function createServer(codexHome, opts = {}) {
       clearInterval(heartbeat);
       detachLiveSubscriber(state, res);
       res.end();
+    });
+  });
+
+  app.post('/api/rerun', (_req, res) => {
+    restartIngest(codexHome, state, ingestOpts);
+    res.status(202).json({
+      ok: true,
+      ingest_id: state.ingest_id,
     });
   });
 
@@ -120,6 +129,6 @@ export function createServer(codexHome, opts = {}) {
     });
   }
 
-  runIngest(codexHome, state, opts);
+  runIngest(codexHome, state, ingestOpts);
   return app;
 }

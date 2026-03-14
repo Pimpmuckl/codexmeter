@@ -6,7 +6,7 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor, getContrastLabelColor } from '../utils/colors';
-import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
+import { ECHARTS_ANIMATION, ECHARTS_DONUT_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
 
@@ -286,7 +286,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
   const familyTotal = topFamilies.reduce((s, f) => s + (f.tokens || 0), 0);
   const familyOption = {
     backgroundColor: 'transparent',
-    ...ECHARTS_ANIMATION,
+    ...ECHARTS_DONUT_ANIMATION,
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -294,6 +294,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
+      ...ECHARTS_DONUT_ANIMATION,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}', ...ECHARTS_LABEL_ANIMATION },
@@ -316,7 +317,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
   const modelTotal = topModels.reduce((s, m) => s + (m.tokens || 0), 0);
   const modelOption = {
     backgroundColor: 'transparent',
-    ...ECHARTS_ANIMATION,
+    ...ECHARTS_DONUT_ANIMATION,
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -324,6 +325,7 @@ export default function Overview({ data, heatmap, daily, families, repos, models
     },
     series: [{
       type: 'pie',
+      ...ECHARTS_DONUT_ANIMATION,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}', ...ECHARTS_LABEL_ANIMATION },

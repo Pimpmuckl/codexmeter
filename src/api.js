@@ -10,6 +10,12 @@ async function fetchJson(endpoint) {
   return res.json();
 }
 
+async function postJson(endpoint) {
+  const res = await fetch(apiUrl(endpoint), { method: 'POST' });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export const api = {
   url: apiUrl,
   progress: () => fetchJson('/api/progress'),
@@ -21,4 +27,5 @@ export const api = {
   heatmap: () => fetchJson('/api/heatmap'),
   families: () => fetchJson('/api/families'),
   live: () => new EventSource(apiUrl('/api/live')),
+  rerun: () => postJson('/api/rerun'),
 };

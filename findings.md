@@ -10,3 +10,17 @@
 - `review_plan` feedback confirmed the main architectural risk: SSE is only useful if it rides on one canonical live accumulator rather than layering on top of the old partial-rebuild cadence.
 - `review_plan` also surfaced that reconnect semantics need explicit `ingest_id` and monotonic `seq`; that is now part of the live contract.
 - Live SSE smoke test showed the transport works, but current patch payloads are still heavy because changed repo/model entries include nested breakdown objects. That may still limit smoothness even with higher-frequency updates.
+- Phase 2 trimmed the live payload contract toward Overview surfaces:
+  - repos/models/families are now summary-only arrays in live transport
+  - detail tabs stay on settled REST data during ingest
+  - daily live payload keeps only the by-model data needed for the Overview spark
+- A 1s live bootstrap shrank from roughly `111 KB` in phase 1 to roughly `22 KB` after summary-only live payloads.
+- Server flushes are now cadence-gated by surface (`overview` faster than `rankings`/`daily`/`heatmap`) instead of shipping every dirty surface in the same burst.
+- Frontend SSE application is now batched onto `requestAnimationFrame`, so multiple stream events within a frame collapse into one React/ECharts update pass.
+- Rerun support needs backend run invalidation, not just a new route; old ingest work keeps running unless each run is gated by a token.
+- The safe rerun shape is:
+  - `POST /api/rerun`
+  - increment `run_token`
+  - reset ingest state
+  - start a new run with a fresh `ingest_id`
+  - broadcast a new SSE bootstrap so connected clients reset cleanly

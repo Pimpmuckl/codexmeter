@@ -1,5 +1,6 @@
 import net from 'net';
 import { spawn } from 'child_process';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -38,6 +39,8 @@ const backend = spawn(
     },
   }
 );
+
+await waitForBackendReady(apiUrl);
 
 const frontend = spawn(
   process.execPath,
@@ -106,6 +109,31 @@ function isPortAvailable(port) {
     server.on('error', () => resolve(false));
     server.listen({ host: HOST, port }, () => {
       server.close(() => resolve(true));
+    });
+  });
+}
+
+async function waitForBackendReady(baseUrl) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (shuttingDown) return;
+    const ready = await canReach(`${baseUrl}/api/progress`);
+    if (ready) return;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error(`Timed out waiting for backend readiness at ${baseUrl}`);
+}
+
+function canReach(url) {
+  return new Promise((resolve) => {
+    const req = http.get(url, (res) => {
+      res.resume();
+      resolve(res.statusCode >= 200 && res.statusCode < 500);
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(1000, () => {
+      req.destroy();
+      resolve(false);
     });
   });
 }

@@ -1,15 +1,11 @@
-function sortByTokensDesc(values) {
-  return Object.values(values || {}).sort((a, b) => (b?.tokens || 0) - (a?.tokens || 0));
-}
-
 export function createEmptyLiveClientState() {
   return {
     ingest_id: null,
     seq: 0,
     overview: { total: {}, d7: {}, d30: {}, cost_assumptions: null },
-    repos: { total: {}, d7: {}, d30: {} },
-    models: { total: {}, d7: {}, d30: {} },
-    families: { total: {}, d7: {}, d30: {} },
+    repos: { total: [], d7: [], d30: [] },
+    models: { total: [], d7: [], d30: [] },
+    families: { total: [], d7: [], d30: [] },
     daily: {},
     heatmap: {},
   };
@@ -45,7 +41,7 @@ export function mergeLiveEvent(prev, payload, mode) {
 function mergeRangeObjects(target, source) {
   if (!source) return;
   for (const rangeKey of ['total', 'd7', 'd30']) {
-    if (source[rangeKey]) target[rangeKey] = { ...target[rangeKey], ...source[rangeKey] };
+    if (source[rangeKey]) target[rangeKey] = source[rangeKey];
   }
 }
 
@@ -60,19 +56,19 @@ function cloneLiveState(state) {
       cost_assumptions: state.overview.cost_assumptions,
     },
     repos: {
-      total: { ...state.repos.total },
-      d7: { ...state.repos.d7 },
-      d30: { ...state.repos.d30 },
+      total: [...state.repos.total],
+      d7: [...state.repos.d7],
+      d30: [...state.repos.d30],
     },
     models: {
-      total: { ...state.models.total },
-      d7: { ...state.models.d7 },
-      d30: { ...state.models.d30 },
+      total: [...state.models.total],
+      d7: [...state.models.d7],
+      d30: [...state.models.d30],
     },
     families: {
-      total: { ...state.families.total },
-      d7: { ...state.families.d7 },
-      d30: { ...state.families.d30 },
+      total: [...state.families.total],
+      d7: [...state.families.d7],
+      d30: [...state.families.d30],
     },
     daily: { ...state.daily },
     heatmap: { ...state.heatmap },
@@ -90,29 +86,17 @@ export function buildLiveDataEnvelope(liveState, progress) {
       generated_at: progress?.generated_at || null,
     },
     repos: {
-      data: {
-        total: sortByTokensDesc(liveState.repos.total),
-        d7: sortByTokensDesc(liveState.repos.d7),
-        d30: sortByTokensDesc(liveState.repos.d30),
-      },
+      data: liveState.repos,
       complete: progress?.complete || false,
       generated_at: progress?.generated_at || null,
     },
     models: {
-      data: {
-        total: sortByTokensDesc(liveState.models.total),
-        d7: sortByTokensDesc(liveState.models.d7),
-        d30: sortByTokensDesc(liveState.models.d30),
-      },
+      data: liveState.models,
       complete: progress?.complete || false,
       generated_at: progress?.generated_at || null,
     },
     families: {
-      data: {
-        total: sortByTokensDesc(liveState.families.total),
-        d7: sortByTokensDesc(liveState.families.d7),
-        d30: sortByTokensDesc(liveState.families.d30),
-      },
+      data: liveState.families,
       complete: progress?.complete || false,
       generated_at: progress?.generated_at || null,
     },

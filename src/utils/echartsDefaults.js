@@ -18,8 +18,11 @@ export const ECHARTS_LABEL_ANIMATION = {
 };
 
 /** Detail donut charts (Repos/Models/Daily) - same as bar, shared config */
-export const ECHARTS_DONUT_ANIMATION = {
+export const ECHARTS_DONUT_ANIMATION = {  
   ...ECHARTS_ANIMATION,
+  animationDurationUpdate: 100,
+  animationDelayUpdate: 0,
+  animationEasingUpdate: 'cubicOut',
 };
 
 /** Detail bar charts (Repos/Models/Daily) - delayed so they finish with donuts */

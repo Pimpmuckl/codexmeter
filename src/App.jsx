@@ -17,7 +17,7 @@ const RANGES = [
 
 function fmtDate(ts) {
   if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
 }
 
 const PHASE_LABELS = {
@@ -38,6 +38,9 @@ export default function App() {
   const [liveState, setLiveState] = useState(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [fadingOut, setFadingOut] = useState(false);
+  const [ingestFadeOut, setIngestFadeOut] = useState(false);
+  const [ingestFadeDone, setIngestFadeDone] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -51,19 +54,64 @@ export default function App() {
     }
   }, []);
 
+  const handleRerun = useCallback(async () => {
+    if (rerunning) return;
+    try {
+      setRerunning(true);
+      setTab('Overview');
+      await api.rerun();
+      window.location.reload();
+    } catch (err) {
+      console.error('Rerun error:', err);
+      setRerunning(false);
+    }
+  }, [rerunning]);
+
   useEffect(() => {
     let alive = true;
     let interval = null;
     let source = null;
     let usingFallback = false;
     let terminalSseState = false;
+    let queuedEvents = [];
+    let frameId = 0;
+    let liveStateRef = null;
+    let progressRef = null;
 
-    const applyLivePayload = (payload, mode) => {
-      setProgress(payload.progress);
-      setLiveState((prev) => {
-        if (prev && payload.ingest_id === prev.ingest_id && payload.seq <= prev.seq) return prev;
-        return mergeLiveEvent(prev, payload, mode);
-      });
+    const flushQueuedEvents = () => {
+      frameId = 0;
+      if (!alive || queuedEvents.length === 0) return;
+
+      let nextLiveState = liveStateRef;
+      let nextProgress = progressRef;
+
+      for (const event of queuedEvents) {
+        const { payload, mode, progressOnly } = event;
+        nextProgress = payload.progress;
+        if (!progressOnly) {
+          if (nextLiveState && payload.ingest_id === nextLiveState.ingest_id && payload.seq <= nextLiveState.seq) {
+            continue;
+          }
+          nextLiveState = mergeLiveEvent(nextLiveState, payload, mode);
+        }
+      }
+
+      queuedEvents = [];
+      if (nextProgress !== progressRef) {
+        progressRef = nextProgress;
+        setProgress(nextProgress);
+      }
+      if (nextLiveState !== liveStateRef) {
+        liveStateRef = nextLiveState;
+        setLiveState(nextLiveState);
+      }
+    };
+
+    const enqueueLivePayload = (payload, mode, progressOnly = false) => {
+      queuedEvents.push({ payload, mode, progressOnly });
+      if (!frameId) {
+        frameId = requestAnimationFrame(flushQueuedEvents);
+      }
     };
 
     const startFallbackPolling = () => {
@@ -83,7 +131,6 @@ export default function App() {
           if (p.complete) {
             await fetchAll();
             clearInterval(interval);
-            setLiveState(null);
             return;
           }
 
@@ -110,29 +157,28 @@ export default function App() {
       source.addEventListener('bootstrap', (event) => {
         if (!alive) return;
         const payload = JSON.parse(event.data);
-        applyLivePayload(payload, 'bootstrap');
+        enqueueLivePayload(payload, 'bootstrap');
       });
 
       source.addEventListener('progress', (event) => {
         if (!alive) return;
         const payload = JSON.parse(event.data);
-        setProgress(payload.progress);
+        enqueueLivePayload(payload, 'progress', true);
       });
 
       source.addEventListener('patch', (event) => {
         if (!alive) return;
         const payload = JSON.parse(event.data);
-        applyLivePayload(payload, 'patch');
+        enqueueLivePayload(payload, 'patch');
       });
 
       source.addEventListener('complete', async (event) => {
         if (!alive) return;
         const payload = JSON.parse(event.data);
         terminalSseState = true;
-        applyLivePayload(payload, 'patch');
+        enqueueLivePayload(payload, 'patch');
         await fetchAll();
         if (!alive) return;
-        setLiveState(null);
         source?.close();
       });
 
@@ -140,7 +186,7 @@ export default function App() {
         if (!alive) return;
         const payload = JSON.parse(event.data);
         terminalSseState = true;
-        setProgress(payload.progress);
+        enqueueLivePayload(payload, 'progress', true);
         source?.close();
       });
 
@@ -153,24 +199,15 @@ export default function App() {
       });
     };
 
-    fetchAll();
     startLive();
 
     return () => {
       alive = false;
       clearInterval(interval);
+      if (frameId) cancelAnimationFrame(frameId);
       source?.close();
     };
   }, [fetchAll]);
-
-  useEffect(() => {
-    if (tab !== 'Sessions' || data?.sessions?.data) return;
-    api.sessions().then((sessions) => {
-      setData((prev) => ({ ...prev, sessions }));
-    }).catch((err) => {
-      console.error('Sessions fetch error:', err);
-    });
-  }, [tab, data?.sessions]);
 
   useEffect(() => {
     if (!progress) return;
@@ -189,12 +226,30 @@ export default function App() {
   const complete = progress?.complete;
   const pct = Math.round((progress?.percent || 0) * 100);
 
-  const liveData = useMemo(() => (
-    !progress?.complete && liveState ? buildLiveDataEnvelope(liveState, progress) : null
-  ), [liveState, progress]);
-  const effectiveData = liveData ? { ...data, ...liveData, sessions: data.sessions } : data;
+  useEffect(() => {
+    if (complete && !ingestFadeOut) setIngestFadeOut(true);
+    if (!complete) {
+      setIngestFadeOut(false);
+      setIngestFadeDone(false);
+    }
+  }, [complete, ingestFadeOut]);
+  useEffect(() => {
+    if (!ingestFadeOut) return;
+    const t = setTimeout(() => setIngestFadeDone(true), 350);
+    return () => clearTimeout(t);
+  }, [ingestFadeOut]);
 
-  const ov = effectiveData?.overview?.data;
+  const liveData = useMemo(() => (
+    liveState ? buildLiveDataEnvelope(liveState, progress) : null
+  ), [liveState, progress]);
+  const overviewData = liveData ? liveData.overview : data.overview;
+  const overviewHeatmap = liveData ? liveData.heatmap : data.heatmap;
+  const overviewDaily = liveData ? liveData.daily : data.daily;
+  const overviewFamilies = liveData ? liveData.families : data.families;
+  const overviewRepos = liveData ? liveData.repos : data.repos;
+  const overviewModels = liveData ? liveData.models : data.models;
+
+  const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
   const dateRange = d?.date_range;
 
@@ -226,44 +281,59 @@ export default function App() {
           <span className="navbar-brand">CodexMeter</span>
           <div className="navbar-tabs">
             {TABS.map(t => (
-              <button key={t} className={`navbar-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+              <button
+                key={t}
+                className={`navbar-tab ${tab === t ? 'active' : ''}`}
+                onClick={() => setTab(t)}
+                disabled={!complete && t !== 'Overview'}
+              >
                 {t}
               </button>
             ))}
           </div>
           <div className="navbar-meta">
-            {!complete && (
-              <>
+            {(!complete || !ingestFadeDone) && (
+              <div className={`navbar-ingest-wrap ${ingestFadeOut ? 'navbar-ingest-fade-out' : ''}`}>
                 <div className="navbar-progress-wrap">
                   <div className="navbar-progress-bar" style={{ width: `${pct}%` }} />
                 </div>
-                <span className="incomplete-badge">ingesting {pct}%</span>
-              </>
+                <span className="incomplete-badge ingesting-badge">ingesting <span className="ingesting-pct">{pct}%</span></span>
+              </div>
             )}
             {dateRange && (
-              <>
+              <div className={`navbar-date-wrap ${!complete ? 'navbar-date-wrap-dimmed' : ''}`}>
                 <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                   {fmtDate(dateRange.from)} — {fmtDate(dateRange.to)}
                 </span>
                 <div className="range-toggle">
                   {RANGES.map(r => (
-                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)}>
+                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)} disabled={!complete}>
                       {r.label}
                     </button>
                   ))}
                 </div>
-              </>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="Rerun ingest"
+                  title="Rerun ingest"
+                  onClick={handleRerun}
+                  disabled={rerunning || !complete}
+                >
+                  ↻
+                </button>
+              </div>
             )}
           </div>
           </div>
         </nav>
 
         <div className="main-content">
-          {tab === 'Overview' && <Overview data={effectiveData.overview} heatmap={effectiveData.heatmap} daily={effectiveData.daily} families={effectiveData.families} repos={effectiveData.repos} models={effectiveData.models} range={range} />}
-          {tab === 'Repos' && <Repos data={effectiveData.repos} />}
-          {tab === 'Models' && <Models data={effectiveData.models} />}
-          {tab === 'Daily' && <DailyUsage data={effectiveData.daily} range={range} />}
-          {tab === 'Sessions' && <Sessions data={effectiveData.sessions} />}
+          {tab === 'Overview' && <Overview data={overviewData} heatmap={overviewHeatmap} daily={overviewDaily} families={overviewFamilies} repos={overviewRepos} models={overviewModels} range={range} />}
+          {tab === 'Repos' && <Repos data={data.repos} />}
+          {tab === 'Models' && <Models data={data.models} />}
+          {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}
+          {tab === 'Sessions' && <Sessions data={data.sessions} />}
         </div>
         <div className="app-footer">Made with <span className="loading-heart">♥</span> by JJ</div>
       </div>

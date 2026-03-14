@@ -87,9 +87,39 @@ body {
 }
 .navbar-tab:hover { color: var(--text-primary); background: var(--bg-card); }
 .navbar-tab.active { color: #fff; background: var(--accent); }
-.navbar-meta { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; }
+.navbar-meta { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 0; }
+.navbar-ingest-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+  transition: opacity 0.3s ease;
+}
+.navbar-ingest-wrap.navbar-ingest-fade-out { opacity: 0; pointer-events: none; }
+.navbar-date-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: opacity 0.3s ease;
+}
+.navbar-date-wrap-dimmed {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.navbar-date {
+  display: inline-block;
+  width: 22ch;
+  min-width: 22ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .navbar-progress-wrap {
-  width: 80px;
+  flex: 1;
   height: 4px;
   background: var(--bg-elevated);
   border-radius: 2px;
@@ -305,6 +335,31 @@ body {
 }
 .btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
 .btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s, transform 0.12s;
+}
+.icon-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+  transform: rotate(20deg);
+}
+.icon-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 
 /* ─── Overview daily spark (small, fills remainder when same row) ─── */
 .overview-daily-spark {
@@ -677,6 +732,12 @@ html { scrollbar-width: none; }
   padding: 0.12rem 0.45rem;
   border-radius: 3px;
   animation: pulse 2s infinite;
+}
+.ingesting-badge .ingesting-pct {
+  display: inline-block;
+  min-width: 4ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ECharts tooltip - stay within viewport when appendToBody */
