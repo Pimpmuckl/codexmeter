@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from './api';
 import Overview from './components/Overview';
 import Repos from './components/Repos';
 import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
-import { buildLiveDataEnvelope, buildLiveStateFromSettled, mergeLiveEvent } from './live-state';
+import { buildLiveDataEnvelope, mergeLiveEvent } from './live-state';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
@@ -42,6 +42,9 @@ export default function App() {
   const [ingestFadeOut, setIngestFadeOut] = useState(false);
   const [ingestFadeDone, setIngestFadeDone] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [overviewPresentationSettled, setOverviewPresentationSettled] = useState(true);
+  const [completionPresentationPending, setCompletionPresentationPending] = useState(false);
+  const prevBackendCompleteRef = useRef(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -122,15 +125,7 @@ export default function App() {
     const ensureSettledDataLoaded = async (nextProgress, ingestId = null) => {
       if (!alive || !nextProgress?.complete || settledFetchStarted) return;
       settledFetchStarted = true;
-      const settledData = await fetchAll();
-      if (!alive || !settledData) return;
-      const hydratedLiveState = buildLiveStateFromSettled(
-        settledData,
-        liveStateRef?.ingest_id || ingestId || null,
-        liveStateRef?.seq || 0
-      );
-      liveStateRef = hydratedLiveState;
-      setLiveState(hydratedLiveState);
+      await fetchAll();
     };
 
     const startFallbackPolling = () => {
@@ -250,16 +245,45 @@ export default function App() {
     }
   }, [progress, showOverlay, fadingOut]);
 
-  const complete = progress?.complete;
+  const backendComplete = Boolean(progress?.complete);
+  const complete = backendComplete;
   const pct = Math.round((progress?.percent || 0) * 100);
+  const overviewIngestProgress = Math.min(Math.max(progress?.percent || 0, 0), 1);
+  const visibleIngesting = !backendComplete || completionPresentationPending;
+  const overviewIngestActive = Boolean(progress && visibleIngesting && progress.phase !== 'error');
 
   useEffect(() => {
-    if (complete && !ingestFadeOut) setIngestFadeOut(true);
-    if (!complete) {
+    if (!progress?.complete) {
+      setOverviewPresentationSettled(false);
+    }
+  }, [progress?.complete]);
+
+  useEffect(() => {
+    const justCompleted = backendComplete && !prevBackendCompleteRef.current;
+    prevBackendCompleteRef.current = backendComplete;
+
+    if (!backendComplete) {
+      setCompletionPresentationPending(false);
+      return;
+    }
+
+    if (justCompleted && !overviewPresentationSettled) {
+      setCompletionPresentationPending(true);
+      return;
+    }
+
+    if (completionPresentationPending && overviewPresentationSettled) {
+      setCompletionPresentationPending(false);
+    }
+  }, [backendComplete, overviewPresentationSettled, completionPresentationPending]);
+
+  useEffect(() => {
+    if (!visibleIngesting && !ingestFadeOut) setIngestFadeOut(true);
+    if (visibleIngesting) {
       setIngestFadeOut(false);
       setIngestFadeDone(false);
     }
-  }, [complete, ingestFadeOut]);
+  }, [visibleIngesting, ingestFadeOut]);
   useEffect(() => {
     if (!ingestFadeOut) return;
     const t = setTimeout(() => setIngestFadeDone(true), 350);
@@ -267,8 +291,8 @@ export default function App() {
   }, [ingestFadeOut]);
 
   const liveData = useMemo(() => (
-    liveState ? buildLiveDataEnvelope(liveState, progress) : null
-  ), [liveState, progress]);
+    liveState ? buildLiveDataEnvelope(liveState) : null
+  ), [liveState]);
   const overviewData = liveData ? liveData.overview : data.overview;
   const overviewHeatmap = liveData ? liveData.heatmap : data.heatmap;
   const overviewDaily = liveData ? liveData.daily : data.daily;
@@ -310,16 +334,16 @@ export default function App() {
             {TABS.map(t => (
               <button
                 key={t}
-                className={`navbar-tab ${tab === t ? 'active' : ''}`}
+                className={`navbar-tab ${tab === t ? 'active' : ''} ${!(backendComplete && ingestFadeDone) && t !== 'Overview' ? 'navbar-tab-dimmed' : ''}`}
                 onClick={() => setTab(t)}
-                disabled={!complete && t !== 'Overview'}
+                disabled={!backendComplete && t !== 'Overview'}
               >
                 {t}
               </button>
             ))}
           </div>
           <div className="navbar-meta">
-            {(!complete || !ingestFadeDone) && (
+            {(visibleIngesting || !ingestFadeDone) && (
               <div className={`navbar-ingest-wrap ${ingestFadeOut ? 'navbar-ingest-fade-out' : ''}`}>
                 <div className="navbar-progress-wrap">
                   <div className="navbar-progress-bar" style={{ width: `${pct}%` }} />
@@ -328,13 +352,13 @@ export default function App() {
               </div>
             )}
             {dateRange && (
-              <div className={`navbar-date-wrap ${!complete ? 'navbar-date-wrap-dimmed' : ''}`}>
+              <div className={`navbar-date-wrap ${!backendComplete ? 'navbar-date-wrap-dimmed' : ''}`}>
                 <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                   {fmtDate(dateRange.from)} — {fmtDate(dateRange.to)}
                 </span>
                 <div className="range-toggle">
                   {RANGES.map(r => (
-                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)} disabled={!complete}>
+                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)} disabled={!backendComplete}>
                       {r.label}
                     </button>
                   ))}
@@ -345,7 +369,7 @@ export default function App() {
                   aria-label="Rerun ingest"
                   title="Rerun ingest"
                   onClick={handleRerun}
-                  disabled={rerunning || !complete}
+                  disabled={rerunning || !backendComplete}
                 >
                   ↻
                 </button>
@@ -356,7 +380,20 @@ export default function App() {
         </nav>
 
         <div className="main-content">
-          {tab === 'Overview' && <Overview data={overviewData} heatmap={overviewHeatmap} daily={overviewDaily} families={overviewFamilies} repos={overviewRepos} models={overviewModels} range={range} />}
+          {tab === 'Overview' && (
+            <Overview
+              data={overviewData}
+              heatmap={overviewHeatmap}
+              daily={overviewDaily}
+              families={overviewFamilies}
+              repos={overviewRepos}
+              models={overviewModels}
+              range={range}
+              onPresentationSettledChange={setOverviewPresentationSettled}
+              ingestProgress={overviewIngestProgress}
+              isIngestActive={overviewIngestActive}
+            />
+          )}
           {tab === 'Repos' && <Repos data={data.repos} />}
           {tab === 'Models' && <Models data={data.models} />}
           {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}

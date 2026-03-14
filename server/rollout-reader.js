@@ -15,6 +15,7 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
     model_name: null,
     reasoning_effort: null,
     first_timestamp: null,
+    first_usage_timestamp: null,
     last_timestamp: null,
     active_seconds: null,
     active_by_day: null,
@@ -97,6 +98,9 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
             if (obj.timestamp && hasUsage(usageDelta)) {
               const ts = new Date(obj.timestamp).getTime();
               if (!isNaN(ts)) {
+                if (!result.first_usage_timestamp || ts < result.first_usage_timestamp) {
+                  result.first_usage_timestamp = ts;
+                }
                 const dayKey = toDayKey(ts);
                 mergeUsageTotals(usageByDay, dayKey, usageDelta);
               }

@@ -1,4 +1,4 @@
-import { ECHARTS_ANIMATION, ECHARTS_DONUT_ANIMATION, ECHARTS_DETAIL_BAR_ANIMATION, ECHARTS_LABEL_ANIMATION, ECHARTS_DETAIL_BAR_LABEL_ANIMATION } from '../utils/echartsDefaults';
+import { ECHARTS_ANIMATION, ECHARTS_DONUT_ANIMATION, ECHARTS_DETAIL_BAR_ANIMATION, ECHARTS_LABEL_ANIMATION, ECHARTS_DETAIL_BAR_LABEL_ANIMATION } from '../utils/animationsDefault';
 
 export function resolveSubchartMode(chartMode, defaultMode) {
   return chartMode === 'default' ? defaultMode : chartMode;
@@ -20,6 +20,7 @@ export function buildDistributionOption({
   defaultMode = 'bar',
   emptyLabel = 'No data',
   renderTitleInChart = true,
+  barLabelProgress = 1,
 }) {
   const mode = resolveSubchartMode(chartMode, defaultMode);
   const normalizedRows = (rows || [])
@@ -136,7 +137,7 @@ export function buildDistributionOption({
       label: {
         show: true,
         position: 'right',
-        formatter: (p) => valueFormatter(p.value),
+        formatter: (p) => valueFormatter((p.value ?? 0) * barLabelProgress),
         color: '#8b949e',
         fontSize: 9,
         ...ECHARTS_DETAIL_BAR_LABEL_ANIMATION,

@@ -5,16 +5,14 @@ import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { getRepoColor, getFamilyColor, getModelColor } from '../utils/colors';
-import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/echartsDefaults';
+import { formatCompactNumber } from '../utils/formatters';
+import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/animationsDefault';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, CanvasRenderer]);
 
 function fmt(n) {
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return n.toLocaleString();
+  return formatCompactNumber(n);
 }
 
 function fmtCost(n) {
@@ -74,11 +72,11 @@ function RepoDetailCharts({ repo, chartMode }) {
       <div className="model-detail-charts">
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models in repo</div>
-          <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
+          <ReactEChartsCore echarts={echarts} option={modelOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
         </div>
         <div className="model-detail-donut">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work type in repo</div>
-          <ReactEChartsCore echarts={echarts} option={familyOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} />
+          <ReactEChartsCore echarts={echarts} option={familyOption} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={true} notMerge={false} />
         </div>
       </div>
       <div className="model-detail-footer">
@@ -160,7 +158,7 @@ export default function Repos({ data, chartMode = 'default' }) {
       type: 'bar',
       data: reversed.map((r) => ({ value: r.tokens, itemStyle: { color: getRepoColor(r.repo_label), borderRadius: [0, 3, 3, 0] } })),
       barMaxWidth: 16,
-      label: { show: true, position: 'right', formatter: (p) => fmt(p.value), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
+      label: { show: true, position: 'right', formatter: (p) => fmt(p.value ?? 0), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
     }],
   };
 
@@ -182,6 +180,7 @@ export default function Repos({ data, chartMode = 'default' }) {
           style={{ height: Math.max(250, top.length * 28) }}
           theme="dark"
           lazyUpdate={true}
+          notMerge={false}
           onEvents={{
             click: (params) => {
               if (params?.componentType === 'series' && params?.dataIndex != null) {

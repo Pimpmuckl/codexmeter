@@ -4,13 +4,10 @@ import {
   flexRender, createColumnHelper,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { formatCompactNumber } from '../utils/formatters';
 
 function fmt(n) {
-  if (n == null) return '—';
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return n.toLocaleString();
+  return formatCompactNumber(n);
 }
 function fmtCost(n) { return n == null ? '—' : '$' + n.toFixed(2); }
 function fmtDur(s) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); const h = Math.floor(m / 60); return h > 0 ? `${h}h ${m % 60}m` : `${m}m`; }
