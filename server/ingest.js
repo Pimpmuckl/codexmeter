@@ -15,6 +15,7 @@ const LIVE_FRAME_INTERVAL_MS = 50;
 const LIVE_DAYS_PER_SECOND = 6;
 const LIVE_OVERVIEW_CADENCE_MS = Math.round(1000 / 10);
 const LIVE_DAY_KEYS_PER_EMIT = 1;
+const LIVE_SESSION_REORDER_BUFFER = 160;
 
 export function createIngestState() {
   return {
@@ -38,6 +39,7 @@ export function createIngestState() {
     live_subscribers: new Set(),
     live_pump_timer: null,
     live_pending_patch: createEmptyLivePatch(),
+    live_session_buffer: [],
     live_progress_dirty: false,
     live_last_emit_at: 0,
     live_last_overview_emit_at: 0,
@@ -95,6 +97,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         usage_total: null,
         usage_by_day: null,
         has_usage_by_day: false,
+        live_sort_ts: null,
         active_by_day: null,
         agent_role: t.agent_role,
         agent_nickname: t.agent_nickname,
@@ -161,12 +164,16 @@ export async function runIngest(codexHome, state, opts = {}) {
             s.usage_by_day = buildUsageByDayMetrics(s.model_name, data.usage_by_day);
             s.has_usage_by_day = s.usage_by_day.length > 0;
           }
+          if (data.first_usage_timestamp) {
+            s.live_sort_ts = Math.floor(data.first_usage_timestamp / 1000);
+          }
           if (data.active_seconds && data.active_seconds > 0) {
             s.elapsed_seconds = data.active_seconds;
             s.active_by_day = data.active_by_day || null;
           }
         }
         finalizeSessionMetrics(s, toDayKey);
+        s.live_sort_day = deriveLiveSortDay(s, toDayKey);
         s.materialized = true;
       }
 
@@ -178,8 +185,14 @@ export async function runIngest(codexHome, state, opts = {}) {
         assignRootThreadIds(sessions);
         lastRootRefreshCount = state.enriched;
       }
+      const liveReady = bufferLiveSessionsForPresentation(state, batch);
+      if (state.live_session_buffer[0]?.live_sort_day) {
+        state.current_date_bucket = state.live_session_buffer[0].live_sort_day;
+      } else if (liveReady[0]?.live_sort_day) {
+        state.current_date_bucket = liveReady[0].live_sort_day;
+      }
       const livePatch = createEmptyLivePatch();
-      for (const session of batch) {
+      for (const session of liveReady) {
         applySessionToLiveState(state.live_state, session, livePatch);
       }
       queueLivePatch(state, livePatch);
@@ -198,6 +211,11 @@ export async function runIngest(codexHome, state, opts = {}) {
     }
 
     assignRootThreadIds(sessions);
+    const finalLivePatch = createEmptyLivePatch();
+    for (const session of flushBufferedLiveSessions(state)) {
+      applySessionToLiveState(state.live_state, session, finalLivePatch);
+    }
+    queueLivePatch(state, finalLivePatch);
 
     state.phase = 'aggregation';
     state.percent = state.needs_enrichment > 0 ? 0.95 : 0.90;
@@ -248,6 +266,7 @@ export function restartIngest(codexHome, state, opts = {}) {
   state.live_state = null;
   state.live_seq = 0;
   state.live_pending_patch = createEmptyLivePatch();
+  state.live_session_buffer = [];
   state.live_progress_dirty = false;
   state.live_last_emit_at = 0;
   state.live_last_overview_emit_at = 0;
@@ -366,6 +385,49 @@ function buildUsageByDayMetrics(modelName, usageByDay) {
   }
   entries.sort((a, b) => a.day.localeCompare(b.day));
   return entries;
+}
+
+function deriveLiveSortDay(session, toDayKey) {
+  if (session.has_usage_by_day && session.usage_by_day?.length) {
+    let best = session.usage_by_day[0];
+    for (const entry of session.usage_by_day) {
+      if ((entry.tokens || 0) > (best.tokens || 0)) {
+        best = entry;
+        continue;
+      }
+      if ((entry.tokens || 0) === (best.tokens || 0) && String(entry.day) > String(best.day)) {
+        best = entry;
+      }
+    }
+    return best?.day || null;
+  }
+  if (session.started_at) {
+    return toDayKey(session.started_at * 1000);
+  }
+  return null;
+}
+
+function compareLiveSessionOrder(a, b) {
+  const dayCompare = String(a.live_sort_day || '9999-12-31').localeCompare(String(b.live_sort_day || '9999-12-31'));
+  if (dayCompare !== 0) return dayCompare;
+  const liveTsCompare = (a.live_sort_ts || a.started_at || 0) - (b.live_sort_ts || b.started_at || 0);
+  if (liveTsCompare !== 0) return liveTsCompare;
+  return String(a.thread_id || '').localeCompare(String(b.thread_id || ''));
+}
+
+function bufferLiveSessionsForPresentation(state, sessions) {
+  if (!sessions.length) return [];
+  state.live_session_buffer.push(...sessions);
+  state.live_session_buffer.sort(compareLiveSessionOrder);
+  const flushCount = Math.max(0, state.live_session_buffer.length - LIVE_SESSION_REORDER_BUFFER);
+  if (flushCount <= 0) return [];
+  return state.live_session_buffer.splice(0, flushCount);
+}
+
+function flushBufferedLiveSessions(state) {
+  if (!state.live_session_buffer.length) return [];
+  state.live_session_buffer.sort(compareLiveSessionOrder);
+  return state.live_session_buffer.splice(0, state.live_session_buffer.length);
 }
 
 function queueLiveProgress(state) {
