@@ -217,7 +217,10 @@ function applyDailyBucket(dayMap, session, toDayKey, dirtySet) {
     const startDay = toDayKey(startMs);
     const endDay = toDayKey(endMs - 1);
 
-    if (startDay === endDay) {
+    if (session.has_usage_by_day) {
+      addSessionPresence(dayMap, startDay, endDay, startMs, endMs, totalDur, toDayKey, session, dirtySet);
+      addUsageByDay(dayMap, session, dirtySet);
+    } else if (startDay === endDay) {
       addToDay(dayMap, startDay, session, 1.0);
       dirtySet.add(startDay);
     } else {
@@ -247,7 +250,21 @@ function applyDailyBucket(dayMap, session, toDayKey, dirtySet) {
 }
 
 function applyHeatmapBucket(dayMap, session, toDayKey, dirtySet) {
-  if (session.started_at) {
+  if (session.has_usage_by_day) {
+    for (const usageDay of session.usage_by_day || []) {
+      const dayKey = usageDay.day;
+      const day = ensureHeatmapDay(dayMap, dayKey);
+      day.tokens += usageDay.tokens || 0;
+      if (usageDay.cost !== null) day.cost += usageDay.cost;
+      dirtySet.add(dayKey);
+    }
+    if (session.started_at) {
+      const startDay = toDayKey(session.started_at * 1000);
+      const day = ensureHeatmapDay(dayMap, startDay);
+      day.sessions += 1;
+      dirtySet.add(startDay);
+    }
+  } else if (session.started_at) {
     const dayKey = toDayKey(session.started_at * 1000);
     const day = ensureHeatmapDay(dayMap, dayKey);
     day.tokens += session.tokens_used || 0;
@@ -262,6 +279,48 @@ function applyHeatmapBucket(dayMap, session, toDayKey, dirtySet) {
       day.elapsed += seconds || 0;
       dirtySet.add(dayKey);
     }
+  }
+}
+
+function addSessionPresence(dayMap, startDay, endDay, startMs, endMs, totalDur, toDayKey, session, dirtySet) {
+  if (startDay === endDay) {
+    addPresenceToDay(dayMap, startDay, session, 1.0);
+    dirtySet.add(startDay);
+    return;
+  }
+
+  let cursor = dayStartMs(startDay);
+  while (cursor < endMs) {
+    const nextDay = cursor + 86400000;
+    const overlapStart = Math.max(cursor, startMs);
+    const overlapEnd = Math.min(nextDay, endMs);
+    const fraction = (overlapEnd - overlapStart) / totalDur;
+    if (fraction > 0) {
+      const dayKey = toDayKey(cursor);
+      addPresenceToDay(dayMap, dayKey, session, fraction);
+      dirtySet.add(dayKey);
+    }
+    cursor = nextDay;
+  }
+}
+
+function addPresenceToDay(dayMap, dayKey, session, fraction) {
+  const day = ensureDay(dayMap, dayKey);
+  if (fraction > 0.001) day.sessions += 1;
+}
+
+function addUsageByDay(dayMap, session, dirtySet) {
+  for (const usageDay of session.usage_by_day || []) {
+    const dayKey = usageDay.day;
+    const day = ensureDay(dayMap, dayKey);
+    day.tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) day.cost += usageDay.cost;
+
+    const modelKey = session.model_name || 'unknown';
+    if (!day.by_model[modelKey]) day.by_model[modelKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
+    day.by_model[modelKey].tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) day.by_model[modelKey].cost += usageDay.cost;
+    dirtySet.add(dayKey);
   }
 }
 

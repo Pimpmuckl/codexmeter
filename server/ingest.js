@@ -4,7 +4,7 @@ import {
   normalizeCwd, deriveRepoKey, deriveRepoLabel,
   classifyAgentFamily, isSubagent, normalizeModelName,
 } from './normalize.js';
-import { initPricing, priceSession } from './cost-catalog.js';
+import { calculateCostFromUsage, initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
 import { createDayKeyFormatter } from './day-key.js';
 import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap, buildLivePatch } from './live-state.js';
@@ -98,6 +98,8 @@ export async function runIngest(codexHome, state, opts = {}) {
         model_name: null,
         reasoning_effort: null,
         usage_total: null,
+        usage_by_day: null,
+        has_usage_by_day: false,
         active_by_day: null,
         agent_role: t.agent_role,
         agent_nickname: t.agent_nickname,
@@ -160,6 +162,10 @@ export async function runIngest(codexHome, state, opts = {}) {
           if (data.reasoning_effort) s.reasoning_effort = data.reasoning_effort;
           if (data.parent_thread_id) s.parent_thread_id = data.parent_thread_id;
           if (data.usage_total) s.usage_total = data.usage_total;
+          if (data.usage_by_day) {
+            s.usage_by_day = buildUsageByDayMetrics(s.model_name, data.usage_by_day);
+            s.has_usage_by_day = s.usage_by_day.length > 0;
+          }
           if (data.active_seconds && data.active_seconds > 0) {
             s.elapsed_seconds = data.active_seconds;
             s.active_by_day = data.active_by_day || null;
@@ -350,6 +356,21 @@ function finalizeSessionMetrics(session, toDayKey) {
     session.cost = priced.cost;
     session.cost_source = priced.source;
   }
+}
+
+function buildUsageByDayMetrics(modelName, usageByDay) {
+  const entries = [];
+  for (const [dayKey, usage] of Object.entries(usageByDay || {})) {
+    const tokens = (usage?.input_tokens || 0) + (usage?.output_tokens || 0);
+    const cost = calculateCostFromUsage(modelName, usage);
+    entries.push({
+      day: dayKey,
+      tokens,
+      cost,
+    });
+  }
+  entries.sort((a, b) => a.day.localeCompare(b.day));
+  return entries;
 }
 
 function queueLiveProgress(state) {

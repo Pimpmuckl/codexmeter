@@ -240,7 +240,10 @@ function buildDaily(rawSessions, groupedSessions, tz) {
     const startDay = toDayKeyInTz(startMs);
     const endDay = toDayKeyInTz(endMs - 1);
 
-    if (startDay === endDay) {
+    if (s.has_usage_by_day) {
+      addSessionPresence(dayMap, startDay, endDay, startMs, endMs, totalDur, toDayKeyInTz, s);
+      addUsageByDay(dayMap, s);
+    } else if (startDay === endDay) {
       addToDay(dayMap, startDay, s, 1.0);
     } else {
       let cursor = dayStartMs(startDay);
@@ -314,12 +317,25 @@ function buildHeatmap(rawSessions, groupedSessions, tz) {
   const dayMap = new Map();
   for (const s of rawSessions) {
     if (!s.started_at) continue;
-    const dk = toDayKeyInTz(s.started_at * 1000);
-    if (!dayMap.has(dk)) dayMap.set(dk, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
-    const d = dayMap.get(dk);
-    d.tokens += s.tokens_used;
-    if (s.cost !== null) d.cost += s.cost;
-    d.sessions++;
+    if (s.has_usage_by_day) {
+      for (const usageDay of s.usage_by_day || []) {
+        const dayKey = usageDay.day;
+        if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
+        const d = dayMap.get(dayKey);
+        d.tokens += usageDay.tokens || 0;
+        if (usageDay.cost !== null) d.cost += usageDay.cost;
+      }
+      const startDay = toDayKeyInTz(s.started_at * 1000);
+      if (!dayMap.has(startDay)) dayMap.set(startDay, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
+      dayMap.get(startDay).sessions++;
+    } else {
+      const dk = toDayKeyInTz(s.started_at * 1000);
+      if (!dayMap.has(dk)) dayMap.set(dk, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
+      const d = dayMap.get(dk);
+      d.tokens += s.tokens_used;
+      if (s.cost !== null) d.cost += s.cost;
+      d.sessions++;
+    }
   }
 
   for (const s of groupedSessions) {
@@ -330,6 +346,62 @@ function buildHeatmap(rawSessions, groupedSessions, tz) {
     }
   }
   return Object.fromEntries(dayMap);
+}
+
+function addSessionPresence(dayMap, startDay, endDay, startMs, endMs, totalDur, toDayKeyInTz, session) {
+  if (startDay === endDay) {
+    addPresenceToDay(dayMap, startDay, session, 1.0);
+    return;
+  }
+
+  let cursor = dayStartMs(startDay);
+  while (cursor < endMs) {
+    const nextDay = cursor + 86400000;
+    const overlapStart = Math.max(cursor, startMs);
+    const overlapEnd = Math.min(nextDay, endMs);
+    const fraction = (overlapEnd - overlapStart) / totalDur;
+    if (fraction > 0) addPresenceToDay(dayMap, toDayKeyInTz(cursor), session, fraction);
+    cursor = nextDay;
+  }
+}
+
+function addPresenceToDay(dayMap, dayKey, session, fraction) {
+  if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
+  const d = dayMap.get(dayKey);
+  if (fraction > 0.001) d.sessions++;
+
+  const fKey = session.agent_family;
+  if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0 };
+  if (fraction > 0.001) d.by_family[fKey].sessions++;
+
+  const rKey = session.repo_label || 'unknown';
+  if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, sessions: 0 };
+  if (fraction > 0.001) d.by_repo[rKey].sessions++;
+}
+
+function addUsageByDay(dayMap, session) {
+  for (const usageDay of session.usage_by_day || []) {
+    const dayKey = usageDay.day;
+    if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
+    const d = dayMap.get(dayKey);
+    d.tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) d.cost += usageDay.cost;
+
+    const mKey = session.model_name || 'unknown';
+    if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
+    d.by_model[mKey].tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) d.by_model[mKey].cost += usageDay.cost;
+
+    const fKey = session.agent_family;
+    if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0 };
+    d.by_family[fKey].tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) d.by_family[fKey].cost += usageDay.cost;
+
+    const rKey = session.repo_label || 'unknown';
+    if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, sessions: 0 };
+    d.by_repo[rKey].tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) d.by_repo[rKey].cost += usageDay.cost;
+  }
 }
 
 function dayStartMs(dayKey) {

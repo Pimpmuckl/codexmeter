@@ -32,7 +32,7 @@ export function getCacheAwareRate(modelName) {
   return INPUT_FRACTION * effectiveInputRate + OUTPUT_FRACTION * entry.output;
 }
 
-function calculateCostFromUsage(modelName, usage) {
+export function calculateCostFromUsage(modelName, usage) {
   if (!modelName || !usage) return null;
   const entry = getPricing()[modelName];
   if (!entry) return null;
