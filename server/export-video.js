@@ -10,15 +10,24 @@ import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 
 const EXPORT_WIDTH = OVERVIEW_INGEST_ANIMATION.videoExport?.width ?? 1080;
 const EXPORT_HEIGHT = OVERVIEW_INGEST_ANIMATION.videoExport?.height ?? 864;
-const EXPORT_FPS = OVERVIEW_INGEST_ANIMATION.videoExport?.fps ?? 24;
-const EXPORT_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.durationMs ?? 10000;
+const EXPORT_FPS = OVERVIEW_INGEST_ANIMATION.videoExport?.fps ?? 60;
+const EXPORT_INTRO_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.introDurationMs ?? 900;
+const EXPORT_REPLAY_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.replayDurationMs ?? 8000;
+const EXPORT_TAIL_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.tailDurationMs ?? 5000;
+const EXPORT_TOTAL_DURATION_MS = EXPORT_INTRO_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS;
+const EXPORT_TAIL_REPLAY_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailReplayFraction ?? 0.72;
+const EXPORT_CAPTURE_FORMAT = OVERVIEW_INGEST_ANIMATION.videoExport?.captureFormat ?? 'png';
+const EXPORT_JPEG_QUALITY = OVERVIEW_INGEST_ANIMATION.videoExport?.jpegQuality ?? 92;
+const EXPORT_CRF = OVERVIEW_INGEST_ANIMATION.videoExport?.crf ?? 20;
+const EXPORT_ENCODER_PRESET = OVERVIEW_INGEST_ANIMATION.videoExport?.encoderPreset ?? 'fast';
 
-export function createExportManager({ getReplay, getBaseUrl }) {
+export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl }) {
   const jobs = new Map();
 
   return {
     async startOverviewVideoJob(clientBaseUrl) {
       const replay = getReplay();
+      const settledEnvelope = getSettledEnvelope ? getSettledEnvelope() : null;
       if (!replay?.bootstrap) {
         const err = new Error('No completed ingest replay is available yet.');
         err.statusCode = 409;
@@ -41,10 +50,19 @@ export function createExportManager({ getReplay, getBaseUrl }) {
         updated_at: new Date().toISOString(),
         replay_ingest_id: replay.ingest_id,
         replay,
+        settled_envelope: settledEnvelope,
         width: EXPORT_WIDTH,
         height: EXPORT_HEIGHT,
         fps: EXPORT_FPS,
-        duration_ms: EXPORT_DURATION_MS,
+        intro_duration_ms: EXPORT_INTRO_DURATION_MS,
+        replay_duration_ms: EXPORT_REPLAY_DURATION_MS,
+        tail_duration_ms: EXPORT_TAIL_DURATION_MS,
+        tail_replay_fraction: EXPORT_TAIL_REPLAY_FRACTION,
+        duration_ms: EXPORT_TOTAL_DURATION_MS,
+        capture_format: EXPORT_CAPTURE_FORMAT,
+        jpeg_quality: EXPORT_JPEG_QUALITY,
+        crf: EXPORT_CRF,
+        encoder_preset: EXPORT_ENCODER_PRESET,
         temp_dir: tempDir,
         frames_dir: framesDir,
         output_path: outputPath,
@@ -75,7 +93,12 @@ export function createExportManager({ getReplay, getBaseUrl }) {
         height: job.height,
         fps: job.fps,
         durationMs: job.duration_ms,
+        introDurationMs: job.intro_duration_ms,
+        replayDurationMs: job.replay_duration_ms,
+        tailDurationMs: job.tail_duration_ms,
+        tailReplayFraction: job.tail_replay_fraction,
         replay: job.replay,
+        settledEnvelope: job.settled_envelope,
       };
     },
 
@@ -131,8 +154,13 @@ export function createExportManager({ getReplay, getBaseUrl }) {
           const timeMs = Math.min(job.duration_ms, Math.round(i * frameStepMs));
           await page.evaluate((ms) => window.__CODEXMETER_EXPORT__?.seek(ms), timeMs);
           await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
-          const framePath = path.join(job.frames_dir, `${String(i).padStart(5, '0')}.png`);
-          await page.screenshot({ path: framePath, type: 'png' });
+          const frameExt = job.capture_format === 'jpeg' ? 'jpg' : 'png';
+          const framePath = path.join(job.frames_dir, `${String(i).padStart(5, '0')}.${frameExt}`);
+          if (job.capture_format === 'jpeg') {
+            await page.screenshot({ path: framePath, type: 'jpeg', quality: job.jpeg_quality });
+          } else {
+            await page.screenshot({ path: framePath, type: 'png' });
+          }
           updateJob(job, 'rendering', 0.05 + ((i + 1) / totalFrames) * 0.8, 'running');
         }
       } finally {
@@ -140,7 +168,11 @@ export function createExportManager({ getReplay, getBaseUrl }) {
       }
 
       updateJob(job, 'encoding', 0.9, 'running');
-      await encodeFramesToMp4(job.frames_dir, job.output_path, job.fps);
+      await encodeFramesToMp4(job.frames_dir, job.output_path, job.fps, {
+        captureFormat: job.capture_format,
+        crf: job.crf,
+        encoderPreset: job.encoder_preset,
+      });
       updateJob(job, 'complete', 1, 'complete');
     } catch (err) {
       job.error = err instanceof Error ? err.message : String(err);
@@ -151,13 +183,18 @@ export function createExportManager({ getReplay, getBaseUrl }) {
 
 export function createVideoExportManager() {
   let replayGetter = () => null;
+  let settledEnvelopeGetter = () => null;
   let baseUrlResolver = async (clientBaseUrl) => clientBaseUrl || null;
   const manager = createExportManager({
     getReplay: () => replayGetter(),
+    getSettledEnvelope: () => settledEnvelopeGetter(),
     getBaseUrl: (clientBaseUrl) => baseUrlResolver(clientBaseUrl),
   });
   manager.setReplayGetter = (fn) => {
     replayGetter = fn;
+  };
+  manager.setSettledEnvelopeGetter = (fn) => {
+    settledEnvelopeGetter = fn;
   };
   manager.setBaseUrlResolver = (fn) => {
     baseUrlResolver = fn;
@@ -165,8 +202,9 @@ export function createVideoExportManager() {
   return manager;
 }
 
-export function startOverviewVideoExport(manager, { replay, appBaseUrl }) {
+export function startOverviewVideoExport(manager, { replay, settledEnvelope, appBaseUrl }) {
   manager.setReplayGetter(() => replay);
+  manager.setSettledEnvelopeGetter(() => settledEnvelope);
   manager.setBaseUrlResolver(async (clientBaseUrl) => clientBaseUrl || appBaseUrl);
   return manager.startOverviewVideoJob(appBaseUrl);
 }
@@ -239,8 +277,9 @@ async function detectBrowserExecutable() {
   throw err;
 }
 
-async function encodeFramesToMp4(framesDir, outputPath, fps) {
-  const inputPattern = path.join(framesDir, '%05d.png');
+async function encodeFramesToMp4(framesDir, outputPath, fps, { captureFormat, crf, encoderPreset }) {
+  const extension = captureFormat === 'jpeg' ? 'jpg' : 'png';
+  const inputPattern = path.join(framesDir, `%05d.${extension}`);
   if (!ffmpegPath) {
     throw new Error('ffmpeg-static is unavailable');
   }
@@ -250,6 +289,10 @@ async function encodeFramesToMp4(framesDir, outputPath, fps) {
       '-framerate', String(fps),
       '-i', inputPattern,
       '-c:v', 'libx264',
+      '-tune', 'animation',
+      '-preset', String(encoderPreset || 'fast'),
+      '-crf', String(crf ?? 20),
+      '-profile:v', 'high',
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
       outputPath,

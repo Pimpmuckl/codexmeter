@@ -71,6 +71,19 @@ export const OVERVIEW_INGEST_ANIMATION = {
     /** Cell is "new winner" if val >= maxVal * this when max increased */
     nearMaxRatio: 0.985,
   },
+  videoExport: {
+    width: 1080,
+    height: 864,
+    fps: 60,
+    introDurationMs: 900,
+    replayDurationMs: 8000,
+    tailDurationMs: 5000,
+    tailReplayFraction: 0.72,
+    captureFormat: 'png',
+    jpegQuality: 92,
+    crf: 10,
+    encoderPreset: 'veryfast',
+  },
 };
 
 /** Shared ECharts animation defaults for non-Overview charts */

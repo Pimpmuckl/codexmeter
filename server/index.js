@@ -87,8 +87,16 @@ export function createServer(codexHome, opts = {}) {
     }
 
     const appBaseUrl = req.get('x-codexmeter-client-base') || opts.frontendBaseUrl || `${req.protocol}://${req.get('host')}`;
+    const settledEnvelope = state.aggregates ? {
+      overview: { data: state.aggregates.overview },
+      repos: { data: state.aggregates.repos },
+      models: { data: state.aggregates.models },
+      families: { data: state.aggregates.families },
+      daily: { data: state.aggregates.daily },
+      heatmap: { data: state.aggregates.heatmap },
+    } : null;
     try {
-      const job = await startOverviewVideoExport(exportManager, { replay, appBaseUrl });
+      const job = await startOverviewVideoExport(exportManager, { replay, settledEnvelope, appBaseUrl });
       res.status(202).json(createJobSummary(job, `${req.protocol}://${req.get('host')}`));
     } catch (err) {
       res.status(err.statusCode || 500).json({ error: err.message || String(err) });
