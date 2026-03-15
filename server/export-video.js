@@ -11,11 +11,13 @@ import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 const EXPORT_WIDTH = OVERVIEW_INGEST_ANIMATION.videoExport?.width ?? 1080;
 const EXPORT_HEIGHT = OVERVIEW_INGEST_ANIMATION.videoExport?.height ?? 864;
 const EXPORT_FPS = OVERVIEW_INGEST_ANIMATION.videoExport?.fps ?? 60;
-const EXPORT_INTRO_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.introDurationMs ?? 900;
+const EXPORT_START_HOLD_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.startHoldDurationMs ?? 500;
 const EXPORT_REPLAY_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.replayDurationMs ?? 8000;
 const EXPORT_TAIL_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.tailDurationMs ?? 5000;
-const EXPORT_TOTAL_DURATION_MS = EXPORT_INTRO_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS;
-const EXPORT_TAIL_REPLAY_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailReplayFraction ?? 0.72;
+const EXPORT_FINAL_HOLD_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.finalHoldDurationMs ?? 3500;
+const EXPORT_TOTAL_DURATION_MS =
+  EXPORT_START_HOLD_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS + EXPORT_FINAL_HOLD_DURATION_MS;
+const EXPORT_TAIL_SOURCE_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailSourceFraction ?? 0.035;
 const EXPORT_CRF = OVERVIEW_INGEST_ANIMATION.videoExport?.crf ?? 20;
 const EXPORT_ENCODER_PRESET = OVERVIEW_INGEST_ANIMATION.videoExport?.encoderPreset ?? 'fast';
 
@@ -52,10 +54,11 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         width: EXPORT_WIDTH,
         height: EXPORT_HEIGHT,
         fps: EXPORT_FPS,
-        intro_duration_ms: EXPORT_INTRO_DURATION_MS,
+        start_hold_duration_ms: EXPORT_START_HOLD_DURATION_MS,
         replay_duration_ms: EXPORT_REPLAY_DURATION_MS,
         tail_duration_ms: EXPORT_TAIL_DURATION_MS,
-        tail_replay_fraction: EXPORT_TAIL_REPLAY_FRACTION,
+        final_hold_duration_ms: EXPORT_FINAL_HOLD_DURATION_MS,
+        tail_source_fraction: EXPORT_TAIL_SOURCE_FRACTION,
         duration_ms: EXPORT_TOTAL_DURATION_MS,
         capture_format: OVERVIEW_INGEST_ANIMATION.videoExport?.captureFormat ?? 'png',
         jpeg_quality: OVERVIEW_INGEST_ANIMATION.videoExport?.jpegQuality ?? 92,
@@ -91,10 +94,13 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         height: job.height,
         fps: job.fps,
         durationMs: job.duration_ms,
-        introDurationMs: job.intro_duration_ms,
+        startHoldDurationMs: job.start_hold_duration_ms,
         replayDurationMs: job.replay_duration_ms,
+        replayEasing: OVERVIEW_INGEST_ANIMATION.videoExport?.replayEasing ?? 'cubicInOut',
         tailDurationMs: job.tail_duration_ms,
-        tailReplayFraction: job.tail_replay_fraction,
+        tailSourceFraction: job.tail_source_fraction,
+        tailEasing: OVERVIEW_INGEST_ANIMATION.videoExport?.tailEasing ?? 'cubicInOut',
+        finalHoldDurationMs: job.final_hold_duration_ms,
         replay: job.replay,
         settledEnvelope: job.settled_envelope,
       };
@@ -137,6 +143,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
           `--window-size=${job.width},${job.height}`,
         ],
       });
+      let capturedFrameCount = 0;
 
       try {
         const context = await browser.newContext({
@@ -149,11 +156,28 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         let captureError = null;
         let frameWriteChain = Promise.resolve();
         const frameExt = job.capture_format === 'jpeg' ? 'jpg' : 'png';
+        const targetFrameIntervalMs = 1000 / Math.max(job.fps || 60, 1);
+        let firstFrameTimestampMs = null;
+        let nextFrameBucketMs = 0;
         cdp.on('Page.screencastFrame', (event) => {
           frameWriteChain = frameWriteChain.then(async () => {
-            const framePath = path.join(job.frames_dir, `${String(frameIndex).padStart(5, '0')}.${frameExt}`);
-            frameIndex += 1;
-            await fs.writeFile(framePath, Buffer.from(event.data, 'base64'));
+            const screencastTimestampMs = Number.isFinite(event?.metadata?.timestamp)
+              ? event.metadata.timestamp * 1000
+              : Date.now();
+            if (firstFrameTimestampMs == null) {
+              firstFrameTimestampMs = screencastTimestampMs;
+              nextFrameBucketMs = 0;
+            }
+            const relativeTimestampMs = Math.max(0, screencastTimestampMs - firstFrameTimestampMs);
+            const shouldWrite = relativeTimestampMs + 0.5 >= nextFrameBucketMs;
+            if (shouldWrite) {
+              const framePath = path.join(job.frames_dir, `${String(frameIndex).padStart(5, '0')}.${frameExt}`);
+              frameIndex += 1;
+              await fs.writeFile(framePath, Buffer.from(event.data, 'base64'));
+              while (nextFrameBucketMs <= relativeTimestampMs + 0.5) {
+                nextFrameBucketMs += targetFrameIntervalMs;
+              }
+            }
             await cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId });
           }).catch((err) => {
             captureError = err;
@@ -194,6 +218,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         if (frameIndex < 2) {
           throw new Error('Screencast capture produced too few frames');
         }
+        capturedFrameCount = frameIndex;
         await context.close();
       } finally {
         await browser.close();
@@ -203,6 +228,8 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
       await encodeFramesToMp4(job.frames_dir, job.output_path, {
         captureFormat: job.capture_format,
         fps: job.fps,
+        frameCount: capturedFrameCount,
+        durationMs: job.duration_ms,
         crf: job.crf,
         encoderPreset: job.encoder_preset,
       });
@@ -310,22 +337,26 @@ async function detectBrowserExecutable() {
   throw err;
 }
 
-async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, crf, encoderPreset }) {
+async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, frameCount, durationMs, crf, encoderPreset }) {
   const extension = captureFormat === 'jpeg' ? 'jpg' : 'png';
   const inputPattern = path.join(framesDir, `%05d.${extension}`);
   if (!ffmpegPath) {
     throw new Error('ffmpeg-static is unavailable');
   }
+  const effectiveInputFps = frameCount > 0 && durationMs > 0
+    ? Math.max(1, frameCount / (durationMs / 1000))
+    : fps;
   await new Promise((resolve, reject) => {
     const proc = spawn(ffmpegPath, [
       '-y',
-      '-framerate', String(fps),
+      '-framerate', String(effectiveInputFps),
       '-i', inputPattern,
       '-c:v', 'libx264',
       '-tune', 'animation',
       '-preset', String(encoderPreset || 'fast'),
       '-crf', String(crf ?? 20),
       '-profile:v', 'high',
+      '-r', String(fps),
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
       outputPath,

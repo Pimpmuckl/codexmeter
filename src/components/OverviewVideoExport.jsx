@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import Overview from './Overview';
+import { OverviewFrame } from './Overview';
 import { api } from '../api';
 import {
-  createEmptyLiveClientState,
-  buildLiveDataEnvelope,
-  buildLiveStateFromSettled,
   mergeLiveEvent,
 } from '../live-state';
+import { buildOverviewPresentationTarget, interpolateOverviewPresentation } from '../utils/overviewPresentation';
 
 export default function OverviewVideoExport({ jobId }) {
   const [renderData, setRenderData] = useState(null);
@@ -43,13 +41,12 @@ export default function OverviewVideoExport({ jobId }) {
       const sim = simulationRef.current;
       if (!sim || sim.started) return;
       sim.started = true;
-      sim.startWallClockMs = 0;
+      sim.startWallClockMs = Date.now();
 
-      const step = (now) => {
+      const step = () => {
         const activeSim = simulationRef.current;
         if (!activeSim) return;
-        if (!activeSim.startWallClockMs) activeSim.startWallClockMs = now;
-        const elapsedMs = Math.min(activeSim.totalDurationMs, now - activeSim.startWallClockMs);
+        const elapsedMs = Math.min(activeSim.totalDurationMs, Date.now() - activeSim.startWallClockMs);
         setFrameState(advanceExportSimulation(activeSim, elapsedMs));
         if (elapsedMs >= activeSim.totalDurationMs) {
           activeSim.finished = true;
@@ -99,23 +96,12 @@ export default function OverviewVideoExport({ jobId }) {
 
   return (
     <div style={containerStyle}>
-      <div
-        style={{
-          ...frameStyle,
-          opacity: frameState.introOpacity,
-          transform: `translateY(${Math.round((1 - frameState.introOpacity) * 10)}px)`,
-        }}
-      >
-        <Overview
-          data={frameState.liveData.overview}
-          heatmap={frameState.liveData.heatmap}
-          daily={frameState.liveData.daily}
-          families={frameState.liveData.families}
-          repos={frameState.liveData.repos}
-          models={frameState.liveData.models}
-          range="total"
+      <div style={frameStyle}>
+        <OverviewFrame
+          presentation={frameState.presentation}
           ingestProgress={Math.min(Math.max(frameState.progress?.percent || 0, 0), 1)}
           isIngestActive={Boolean(frameState.progress && !frameState.progress.complete)}
+          exportMode={false}
         />
       </div>
     </div>
@@ -126,56 +112,72 @@ function createExportSimulation(renderData) {
   const bootstrapPayload = renderData.replay?.bootstrap?.payload || {};
   const bootstrapProgress = cloneProgress(bootstrapPayload.progress || { percent: 0, complete: false });
   const bootstrapLiveState = mergeLiveEvent(null, bootstrapPayload, 'bootstrap');
-  const emptyLiveState = createEmptyLiveClientState();
-  const finalLiveState = renderData.settledEnvelope
-    ? buildLiveStateFromSettled(renderData.settledEnvelope, bootstrapPayload.ingest_id, Number.MAX_SAFE_INTEGER)
-    : bootstrapLiveState;
+  const events = renderData.replay?.events || [];
+  const firstPatchIndex = events.findIndex((event) => event.event === 'patch');
+  const firstPatchAtMs = firstPatchIndex >= 0 ? events[firstPatchIndex].at_ms || 0 : 0;
+  const keyframes = buildPresentationKeyframes(renderData, bootstrapLiveState, events);
+  const initialPresentation = keyframes[0]?.presentation || emptyPresentationTarget();
+  const initialProgress = firstPatchIndex >= 0
+    ? cloneProgress(events[firstPatchIndex].payload?.progress || bootstrapProgress)
+    : cloneProgress(bootstrapProgress);
 
-  const introDurationMs = Math.max(renderData.introDurationMs || 0, 0);
+  const startHoldDurationMs = Math.max(renderData.startHoldDurationMs || 0, 0);
   const replayDurationMs = Math.max(renderData.replayDurationMs || renderData.replay?.duration_ms || 1, 1);
   const tailDurationMs = Math.max(renderData.tailDurationMs || 0, 0);
-  const totalDurationMs = Math.max(renderData.durationMs || (introDurationMs + replayDurationMs + tailDurationMs) || 1, 1);
-  const tailReplayFraction = clamp01(renderData.tailReplayFraction ?? 0.72);
-  const tailReplayDurationMs = Math.round(tailDurationMs * tailReplayFraction);
-  const tailSettleDurationMs = Math.max(0, tailDurationMs - tailReplayDurationMs);
+  const finalHoldDurationMs = Math.max(renderData.finalHoldDurationMs || 0, 0);
+  const totalDurationMs = Math.max(
+    renderData.durationMs || (startHoldDurationMs + replayDurationMs + tailDurationMs + finalHoldDurationMs) || 1,
+    1
+  );
+  const tailSourceFraction = clamp01(renderData.tailSourceFraction ?? 0.035);
   const sourceDurationMs = Math.max(renderData.replay?.duration_ms || 0, 0);
-  const totalReplayPlaybackDurationMs = Math.max(1, replayDurationMs + tailReplayDurationMs);
-  const mainReplaySourceDurationMs = Math.round(sourceDurationMs * (replayDurationMs / totalReplayPlaybackDurationMs));
+  const sourceStartMs = Math.min(Math.max(firstPatchAtMs, 0), sourceDurationMs);
+  const effectiveSourceDurationMs = Math.max(1, sourceDurationMs - sourceStartMs);
+  const tailSourceDurationMs = Math.max(1, Math.round(effectiveSourceDurationMs * tailSourceFraction));
+  const mainReplaySourceDurationMs = Math.max(0, effectiveSourceDurationMs - tailSourceDurationMs);
+  const tailSourceStartMs = Math.max(sourceStartMs, sourceDurationMs - tailSourceDurationMs);
+  const replayEasing = renderData.replayEasing || 'cubicInOut';
+  const tailEasing = renderData.tailEasing || 'cubicInOut';
+  const finalPresentation = keyframes[keyframes.length - 1]?.presentation || initialPresentation;
+  const tailStartPresentation = samplePresentationFromKeyframes(keyframes, tailSourceStartMs);
 
   return {
     renderData,
     totalDurationMs,
-    introDurationMs,
+    startHoldDurationMs,
     replayDurationMs,
     tailDurationMs,
-    tailReplayDurationMs,
-    tailSettleDurationMs,
+    finalHoldDurationMs,
     sourceDurationMs,
+    sourceStartMs,
+    effectiveSourceDurationMs,
+    tailSourceDurationMs,
+    tailSourceStartMs,
     mainReplaySourceDurationMs,
-    tailReplayStartMs: introDurationMs + replayDurationMs,
-    tailSettleStartMs: introDurationMs + replayDurationMs + tailReplayDurationMs,
+    replayStartMs: startHoldDurationMs,
+    tailStartMs: startHoldDurationMs + replayDurationMs,
+    finalHoldStartMs: startHoldDurationMs + replayDurationMs + tailDurationMs,
     currentSeekMs: 0,
-    eventIndex: 0,
-    bootstrapped: introDurationMs <= 0,
-    settledApplied: false,
     started: false,
     finished: false,
     startWallClockMs: 0,
-    liveState: introDurationMs <= 0 ? bootstrapLiveState : emptyLiveState,
-    bootstrapLiveState,
-    finalLiveState,
-    progress: introDurationMs <= 0 ? bootstrapProgress : { ...bootstrapProgress, percent: 0, complete: false },
+    presentation: initialPresentation,
+    keyframes,
+    keyframeIndex: 0,
+    tailStartPresentation,
+    finalPresentation,
+    progress: initialProgress || { ...bootstrapProgress, percent: 0, complete: false },
     bootstrapProgress,
+    replayEasing,
+    tailEasing,
   };
 }
 
 function snapshotExportSimulation(sim) {
   return {
-    liveData: buildLiveDataEnvelope(sim.liveState),
+    liveData: { ready: true },
+    presentation: sim.presentation,
     progress: sim.progress,
-    introOpacity: sim.introDurationMs > 0
-      ? applyCubicOut(clamp01(sim.currentSeekMs / Math.max(sim.introDurationMs, 1)))
-      : 1,
   };
 }
 
@@ -183,47 +185,27 @@ function advanceExportSimulation(sim, requestedSeekMs) {
   const targetSeekMs = Math.min(Math.max(Number(requestedSeekMs) || 0, 0), sim.totalDurationMs);
   sim.currentSeekMs = targetSeekMs;
 
-  if (!sim.bootstrapped && targetSeekMs >= sim.introDurationMs) {
-    sim.bootstrapped = true;
-    sim.liveState = sim.bootstrapLiveState;
-    sim.progress = cloneProgress(sim.bootstrapProgress);
+  if (targetSeekMs < sim.tailStartMs) {
+    const normalizedReplayMs = mapReplaySeekMs(sim, targetSeekMs);
+    sim.presentation = samplePresentationAtSource(sim, normalizedReplayMs);
+  } else if (targetSeekMs < sim.finalHoldStartMs) {
+    const tailProgress = clamp01((targetSeekMs - sim.tailStartMs) / Math.max(sim.tailDurationMs, 1));
+    sim.presentation = interpolateOverviewPresentation(
+      sim.tailStartPresentation,
+      sim.finalPresentation,
+      applyNamedEasing(sim.tailEasing, tailProgress)
+    );
+  } else {
+    sim.presentation = sim.finalPresentation;
   }
 
-  if (!sim.bootstrapped) {
-    const introProgress = clamp01(targetSeekMs / Math.max(sim.introDurationMs, 1));
-    sim.progress = {
-      ...(sim.bootstrapProgress || {}),
-      percent: lerpNumber(0, sim.bootstrapProgress?.percent || 0, applyCubicOut(introProgress)),
-      complete: false,
-    };
-    return snapshotExportSimulation(sim);
-  }
-
-  const normalizedReplayMs = mapReplaySeekMs(sim, targetSeekMs);
-
-  while (sim.eventIndex < (sim.renderData.replay.events || []).length) {
-    const event = sim.renderData.replay.events[sim.eventIndex];
-    if ((event.at_ms || 0) > normalizedReplayMs) break;
-    sim.eventIndex += 1;
-    sim.progress = cloneProgress(event.payload?.progress || sim.progress);
-    if (event.event === 'patch') {
-      sim.liveState = mergeLiveEvent(sim.liveState, event.payload, 'patch');
-    }
-  }
-
-  if (!sim.settledApplied && targetSeekMs >= sim.tailSettleStartMs) {
-    sim.settledApplied = true;
-    sim.liveState = sim.finalLiveState;
-  }
-
-  if (targetSeekMs >= sim.tailSettleStartMs) {
-    const settleProgress = clamp01((targetSeekMs - sim.tailSettleStartMs) / Math.max(sim.tailSettleDurationMs || 1, 1));
-    const easedSettle = applyCubicOut(settleProgress);
+  if (targetSeekMs >= sim.finalHoldStartMs) {
+    const holdProgress = clamp01((targetSeekMs - sim.finalHoldStartMs) / Math.max(sim.finalHoldDurationMs || 1, 1));
     sim.progress = {
       ...(sim.progress || {}),
-      percent: lerpNumber(sim.progress?.percent || 0, 1, easedSettle),
-      complete: settleProgress >= 1,
-      phase: settleProgress >= 1 ? 'complete' : (sim.progress?.phase || 'finalizing'),
+      percent: 1,
+      complete: true,
+      phase: holdProgress >= 1 ? 'complete' : 'complete',
     };
   } else {
     sim.progress = {
@@ -240,17 +222,12 @@ function advanceExportSimulation(sim, requestedSeekMs) {
 }
 
 function mapReplaySeekMs(sim, timelineMs) {
-  if (timelineMs <= sim.introDurationMs) return 0;
+  if (timelineMs <= sim.replayStartMs) return 0;
 
-  const afterIntroMs = timelineMs - sim.introDurationMs;
-  if (afterIntroMs <= sim.replayDurationMs) {
-    const progress = clamp01(afterIntroMs / Math.max(sim.replayDurationMs, 1));
-    return Math.round(sim.mainReplaySourceDurationMs * progress);
-  }
-
-  if (timelineMs <= sim.tailSettleStartMs) {
-    const tailProgress = clamp01((timelineMs - sim.tailReplayStartMs) / Math.max(sim.tailReplayDurationMs, 1));
-    return Math.round(lerpNumber(sim.mainReplaySourceDurationMs, sim.sourceDurationMs, tailProgress));
+  const replayElapsedMs = timelineMs - sim.replayStartMs;
+  if (replayElapsedMs <= sim.replayDurationMs) {
+    const progress = clamp01(replayElapsedMs / Math.max(sim.replayDurationMs, 1));
+    return Math.round(sim.sourceStartMs + (sim.mainReplaySourceDurationMs * applyNamedEasing(sim.replayEasing, progress)));
   }
 
   return sim.sourceDurationMs;
@@ -258,6 +235,82 @@ function mapReplaySeekMs(sim, timelineMs) {
 
 function cloneProgress(progress) {
   return progress ? { ...progress } : null;
+}
+
+function buildPresentationKeyframes(renderData, bootstrapLiveState, events) {
+  const keyframes = [];
+  let liveState = bootstrapLiveState;
+  let seq = 0;
+
+  for (const event of events) {
+    if (event.event !== 'patch') continue;
+    seq += 1;
+    liveState = mergeLiveEvent(liveState, event.payload, 'patch');
+    keyframes.push({
+      at_ms: Math.max(0, event.at_ms || 0),
+      presentation: buildOverviewPresentationTarget({
+        overview: { data: liveState.overview },
+        heatmap: { data: liveState.heatmap },
+        daily: { data: Object.entries(liveState.daily).sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, ...value })) },
+        families: { data: liveState.families },
+        repos: { data: liveState.repos },
+        models: { data: liveState.models },
+        range: 'total',
+      }),
+    });
+  }
+
+  if (renderData.settledEnvelope) {
+    keyframes.push({
+      at_ms: Math.max(renderData.replay?.duration_ms || 0, keyframes[keyframes.length - 1]?.at_ms || 0),
+      presentation: buildOverviewPresentationTarget({
+        overview: renderData.settledEnvelope.overview,
+        heatmap: renderData.settledEnvelope.heatmap,
+        daily: renderData.settledEnvelope.daily,
+        families: renderData.settledEnvelope.families,
+        repos: renderData.settledEnvelope.repos,
+        models: renderData.settledEnvelope.models,
+        range: 'total',
+      }),
+    });
+  }
+
+  if (!keyframes.length) {
+    keyframes.push({ at_ms: 0, presentation: emptyPresentationTarget() });
+  }
+
+  return keyframes;
+}
+
+function samplePresentationAtSource(sim, sourceMs) {
+  return samplePresentationFromKeyframes(sim.keyframes, sourceMs, sim);
+}
+
+function samplePresentationFromKeyframes(frames, sourceMs, sim = null) {
+  if (!frames.length) return emptyPresentationTarget();
+  if (sourceMs <= frames[0].at_ms) return frames[0].presentation;
+
+  let idx = sim?.keyframeIndex || 0;
+  while (idx + 1 < frames.length && frames[idx + 1].at_ms <= sourceMs) idx += 1;
+  if (sim) sim.keyframeIndex = idx;
+
+  const from = frames[idx];
+  const to = frames[Math.min(idx + 1, frames.length - 1)];
+  if (!to || to.at_ms <= from.at_ms) return from.presentation;
+  const t = clamp01((sourceMs - from.at_ms) / Math.max(to.at_ms - from.at_ms, 1));
+  return interpolateOverviewPresentation(from.presentation, to.presentation, t);
+}
+
+function emptyPresentationTarget() {
+  return buildOverviewPresentationTarget({
+    overview: { data: null },
+    heatmap: { data: {} },
+    daily: { data: [] },
+    families: { data: { total: [], d7: [], d30: [] } },
+    repos: { data: { total: [], d7: [], d30: [] } },
+    models: { data: { total: [], d7: [], d30: [] } },
+    range: 'total',
+  });
 }
 
 function clamp01(value) {
@@ -273,6 +326,24 @@ function applyCubicOut(t) {
   return 1 - Math.pow(1 - x, 3);
 }
 
+function applyCubicInOut(t) {
+  const x = clamp01(t);
+  if (x < 0.5) return 4 * x * x * x;
+  return 1 - Math.pow(-2 * x + 2, 3) / 2;
+}
+
+function applyNamedEasing(name, t) {
+  switch (name) {
+    case 'cubicInOut':
+      return applyCubicInOut(t);
+    case 'cubicOut':
+      return applyCubicOut(t);
+    case 'linear':
+    default:
+      return clamp01(t);
+  }
+}
+
 const containerStyle = {
   width: '100vw',
   minHeight: '100vh',
@@ -284,6 +355,7 @@ const containerStyle = {
 };
 
 const frameStyle = {
+  position: 'relative',
   width: 1080,
   height: 864,
   padding: '24px 28px 20px',
