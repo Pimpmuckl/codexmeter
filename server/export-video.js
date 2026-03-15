@@ -191,6 +191,14 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
           job.id,
           { timeout: 30000 }
         );
+        await page.evaluate(async () => {
+          if (document.fonts?.ready) {
+            try {
+              await document.fonts.ready;
+            } catch {}
+          }
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        });
         await cdp.send('Page.startScreencast', {
           format: job.capture_format === 'jpeg' ? 'jpeg' : 'png',
           quality: job.capture_format === 'jpeg' ? job.jpeg_quality : undefined,

@@ -103,6 +103,9 @@ export default function OverviewVideoExport({ jobId }) {
           isIngestActive={Boolean(frameState.progress && !frameState.progress.complete)}
           exportMode={false}
         />
+        <div style={footerStyle}>
+          Made with <span style={footerHeartStyle}>♥</span> by JJ
+        </div>
       </div>
     </div>
   );
@@ -326,18 +329,32 @@ function applyCubicOut(t) {
   return 1 - Math.pow(1 - x, 3);
 }
 
+function applyCubicIn(t) {
+  const x = clamp01(t);
+  return x * x * x;
+}
+
 function applyCubicInOut(t) {
   const x = clamp01(t);
   if (x < 0.5) return 4 * x * x * x;
   return 1 - Math.pow(-2 * x + 2, 3) / 2;
 }
 
+function applyQuintOut(t) {
+  const x = clamp01(t);
+  return 1 - Math.pow(1 - x, 5);
+}
+
 function applyNamedEasing(name, t) {
   switch (name) {
+    case 'cubicIn':
+      return applyCubicIn(t);
     case 'cubicInOut':
       return applyCubicInOut(t);
     case 'cubicOut':
       return applyCubicOut(t);
+    case 'quintOut':
+      return applyQuintOut(t);
     case 'linear':
     default:
       return clamp01(t);
@@ -367,4 +384,20 @@ const statusStyle = {
   color: '#8b949e',
   fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
   fontSize: 18,
+};
+
+const footerStyle = {
+  position: 'absolute',
+  right: 18,
+  bottom: 10,
+  color: '#8b949e',
+  fontSize: 11,
+  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  letterSpacing: '0.02em',
+  opacity: 0.85,
+  pointerEvents: 'none',
+};
+
+const footerHeartStyle = {
+  color: '#f43f5e',
 };
