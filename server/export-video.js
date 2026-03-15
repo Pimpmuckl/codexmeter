@@ -16,8 +16,6 @@ const EXPORT_REPLAY_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.replayD
 const EXPORT_TAIL_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.tailDurationMs ?? 5000;
 const EXPORT_TOTAL_DURATION_MS = EXPORT_INTRO_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS;
 const EXPORT_TAIL_REPLAY_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailReplayFraction ?? 0.72;
-const EXPORT_CAPTURE_FORMAT = OVERVIEW_INGEST_ANIMATION.videoExport?.captureFormat ?? 'png';
-const EXPORT_JPEG_QUALITY = OVERVIEW_INGEST_ANIMATION.videoExport?.jpegQuality ?? 92;
 const EXPORT_CRF = OVERVIEW_INGEST_ANIMATION.videoExport?.crf ?? 20;
 const EXPORT_ENCODER_PRESET = OVERVIEW_INGEST_ANIMATION.videoExport?.encoderPreset ?? 'fast';
 
@@ -59,8 +57,8 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         tail_duration_ms: EXPORT_TAIL_DURATION_MS,
         tail_replay_fraction: EXPORT_TAIL_REPLAY_FRACTION,
         duration_ms: EXPORT_TOTAL_DURATION_MS,
-        capture_format: EXPORT_CAPTURE_FORMAT,
-        jpeg_quality: EXPORT_JPEG_QUALITY,
+        capture_format: OVERVIEW_INGEST_ANIMATION.videoExport?.captureFormat ?? 'png',
+        jpeg_quality: OVERVIEW_INGEST_ANIMATION.videoExport?.jpegQuality ?? 92,
         crf: EXPORT_CRF,
         encoder_preset: EXPORT_ENCODER_PRESET,
         temp_dir: tempDir,
@@ -131,12 +129,35 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
       const browser = await chromium.launch({
         headless: true,
         executablePath: browserPath,
+        args: [
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-frame-rate-limit',
+          `--window-size=${job.width},${job.height}`,
+        ],
       });
 
       try {
-        const page = await browser.newPage({
+        const context = await browser.newContext({
           viewport: { width: job.width, height: job.height },
           deviceScaleFactor: 1,
+        });
+        const page = await context.newPage();
+        const cdp = await context.newCDPSession(page);
+        let frameIndex = 0;
+        let captureError = null;
+        let frameWriteChain = Promise.resolve();
+        const frameExt = job.capture_format === 'jpeg' ? 'jpg' : 'png';
+        cdp.on('Page.screencastFrame', (event) => {
+          frameWriteChain = frameWriteChain.then(async () => {
+            const framePath = path.join(job.frames_dir, `${String(frameIndex).padStart(5, '0')}.${frameExt}`);
+            frameIndex += 1;
+            await fs.writeFile(framePath, Buffer.from(event.data, 'base64'));
+            await cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId });
+          }).catch((err) => {
+            captureError = err;
+          });
         });
 
         const exportUrl = `${baseUrl}/?export=overview-video&job=${encodeURIComponent(job.id)}`;
@@ -146,30 +167,42 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
           job.id,
           { timeout: 30000 }
         );
-
-        const totalFrames = Math.max(2, Math.ceil((job.duration_ms / 1000) * job.fps));
-        const frameStepMs = 1000 / job.fps;
-
-        for (let i = 0; i < totalFrames; i += 1) {
-          const timeMs = Math.min(job.duration_ms, Math.round(i * frameStepMs));
-          await page.evaluate((ms) => window.__CODEXMETER_EXPORT__?.seek(ms), timeMs);
-          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
-          const frameExt = job.capture_format === 'jpeg' ? 'jpg' : 'png';
-          const framePath = path.join(job.frames_dir, `${String(i).padStart(5, '0')}.${frameExt}`);
-          if (job.capture_format === 'jpeg') {
-            await page.screenshot({ path: framePath, type: 'jpeg', quality: job.jpeg_quality });
-          } else {
-            await page.screenshot({ path: framePath, type: 'png' });
+        await cdp.send('Page.startScreencast', {
+          format: job.capture_format === 'jpeg' ? 'jpeg' : 'png',
+          quality: job.capture_format === 'jpeg' ? job.jpeg_quality : undefined,
+          everyNthFrame: 1,
+        });
+        await page.evaluate(() => window.__CODEXMETER_EXPORT__?.start());
+        const startedAt = Date.now();
+        while (true) {
+          await page.waitForTimeout(200);
+          if (captureError) throw captureError;
+          const playback = await page.evaluate(() => ({
+            currentTimeMs: window.__CODEXMETER_EXPORT__?.currentTimeMs || 0,
+            finished: window.__CODEXMETER_EXPORT__?.finished === true,
+          }));
+          const ratio = Math.min(1, Math.max(0, (playback.currentTimeMs || 0) / Math.max(job.duration_ms, 1)));
+          updateJob(job, 'rendering', 0.05 + ratio * 0.8, 'running');
+          if (playback.finished) break;
+          if (Date.now() - startedAt > Math.max(30000, job.duration_ms * 4)) {
+            throw new Error('Export playback timed out before completion');
           }
-          updateJob(job, 'rendering', 0.05 + ((i + 1) / totalFrames) * 0.8, 'running');
         }
+        await page.waitForTimeout(250);
+        await cdp.send('Page.stopScreencast');
+        await frameWriteChain;
+        if (frameIndex < 2) {
+          throw new Error('Screencast capture produced too few frames');
+        }
+        await context.close();
       } finally {
         await browser.close();
       }
 
       updateJob(job, 'encoding', 0.9, 'running');
-      await encodeFramesToMp4(job.frames_dir, job.output_path, job.fps, {
+      await encodeFramesToMp4(job.frames_dir, job.output_path, {
         captureFormat: job.capture_format,
+        fps: job.fps,
         crf: job.crf,
         encoderPreset: job.encoder_preset,
       });
@@ -277,7 +310,7 @@ async function detectBrowserExecutable() {
   throw err;
 }
 
-async function encodeFramesToMp4(framesDir, outputPath, fps, { captureFormat, crf, encoderPreset }) {
+async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, crf, encoderPreset }) {
   const extension = captureFormat === 'jpeg' ? 'jpg' : 'png';
   const inputPattern = path.join(framesDir, `%05d.${extension}`);
   if (!ffmpegPath) {

@@ -477,6 +477,7 @@ function Overview({
   onPresentationSettledChange = null,
   ingestProgress = 0,
   isIngestActive = false,
+  clockNowMs = null,
 }) {
   const presentation = useAnimatedOverviewPresentation(
     { overview: data, heatmap, daily, families, repos, models, range },
@@ -485,6 +486,7 @@ function Overview({
       onSettledChange: onPresentationSettledChange,
       ingestProgress,
       isIngestActive,
+      clockNowMs,
     }
   );
 
@@ -507,7 +509,8 @@ function areOverviewPropsEqual(prev, next) {
     && prev.range === next.range
     && prev.onPresentationSettledChange === next.onPresentationSettledChange
     && prev.ingestProgress === next.ingestProgress
-    && prev.isIngestActive === next.isIngestActive;
+    && prev.isIngestActive === next.isIngestActive
+    && prev.clockNowMs === next.clockNowMs;
 }
 
 export default memo(Overview, areOverviewPropsEqual);

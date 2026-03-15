@@ -85,7 +85,6 @@ function ModelDetailCharts({ model, fmt, chartMode }) {
     chartMode,
     defaultMode: 'bar',
     renderTitleInChart: false,
-    barLabelProgress,
   });
 
   return (
