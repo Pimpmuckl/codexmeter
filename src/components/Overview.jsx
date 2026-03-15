@@ -261,21 +261,44 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
 
 export function OverviewFrame({
   presentation,
+  rawPresentation = null,
   ingestProgress = 0,
   isIngestActive = false,
   exportMode = false,
+  exportPlayback = false,
+  exportPhase = null,
 }) {
   if (!presentation?.ready) return null;
+  const chartPresentation = exportPlayback && exportPhase === 'replay' && rawPresentation?.ready
+    ? rawPresentation
+    : presentation;
   const { stats, topRepos, topFamilies, topModels } = presentation;
-  const reversedRepos = [...topRepos.slice(0, 6)].reverse();
-  const maxRepoTokens = Math.max(...topRepos.slice(0, 6).map(row => row.tokens || 0), 1);
-  const orderedFamilies = [...topFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
-  const orderedModels = [...topModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const chartTopRepos = chartPresentation.topRepos || [];
+  const chartTopFamilies = chartPresentation.topFamilies || [];
+  const chartTopModels = chartPresentation.topModels || [];
+  const reversedRepos = [...chartTopRepos.slice(0, 6)].reverse();
+  const maxRepoTokens = Math.max(...chartTopRepos.slice(0, 6).map(row => row.tokens || 0), 1);
+  const orderedFamilies = [...chartTopFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const orderedModels = [...chartTopModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const exportBarsUpdateDuration = exportPhase === 'tail' || exportPhase === 'final_hold'
+    ? (OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartTailUpdateDurationMs
+      ?? OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs
+      ?? 240)
+    : (OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs ?? 30);
+  const exportDonutsUpdateDuration = exportPhase === 'tail' || exportPhase === 'final_hold'
+    ? (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartTailUpdateDurationMs
+      ?? OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs
+      ?? 240)
+    : (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs ?? 30);
 
   const repoOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_BARS,
     ...(exportMode ? { animation: false } : {}),
+    ...(exportPlayback ? {
+      animationDurationUpdate: exportBarsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
+    } : {}),
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -326,6 +349,10 @@ export function OverviewFrame({
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
     ...(exportMode ? { animation: false } : {}),
+    ...(exportPlayback ? {
+      animationDurationUpdate: exportDonutsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
+    } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -359,6 +386,10 @@ export function OverviewFrame({
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
     ...(exportMode ? { animation: false } : {}),
+    ...(exportPlayback ? {
+      animationDurationUpdate: exportDonutsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
+    } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,

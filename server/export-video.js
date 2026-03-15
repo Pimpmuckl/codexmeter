@@ -155,6 +155,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         let frameIndex = 0;
         let captureError = null;
         let frameWriteChain = Promise.resolve();
+        const captureTrace = [];
         const frameExt = job.capture_format === 'jpeg' ? 'jpg' : 'png';
         const targetFrameIntervalMs = 1000 / Math.max(job.fps || 60, 1);
         let firstFrameTimestampMs = null;
@@ -172,6 +173,12 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
             const shouldWrite = relativeTimestampMs + 0.5 >= nextFrameBucketMs;
             if (shouldWrite) {
               const framePath = path.join(job.frames_dir, `${String(frameIndex).padStart(5, '0')}.${frameExt}`);
+              captureTrace.push({
+                frameIndex,
+                relativeTimestampMs: Math.round(relativeTimestampMs),
+                bucketMs: Math.round(nextFrameBucketMs),
+                screencastTimestampMs: Math.round(screencastTimestampMs),
+              });
               frameIndex += 1;
               await fs.writeFile(framePath, Buffer.from(event.data, 'base64'));
               while (nextFrameBucketMs <= relativeTimestampMs + 0.5) {
@@ -227,6 +234,26 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
           throw new Error('Screencast capture produced too few frames');
         }
         capturedFrameCount = frameIndex;
+        const exportDebug = await page.evaluate(() => ({
+          debugState: window.__CODEXMETER_EXPORT__?.getDebugState?.() || null,
+          debugTrace: window.__CODEXMETER_EXPORT__?.getDebugTrace?.() || [],
+        }));
+        const debugAnalysis = analyzeExportTrace(exportDebug?.debugTrace || [], captureTrace);
+        await fs.writeFile(
+          path.join(job.temp_dir, 'capture-trace.json'),
+          JSON.stringify(captureTrace, null, 2),
+          'utf8'
+        );
+        await fs.writeFile(
+          path.join(job.temp_dir, 'simulation-trace.json'),
+          JSON.stringify(exportDebug, null, 2),
+          'utf8'
+        );
+        await fs.writeFile(
+          path.join(job.temp_dir, 'analysis-trace.json'),
+          JSON.stringify(debugAnalysis, null, 2),
+          'utf8'
+        );
         await context.close();
       } finally {
         await browser.close();
@@ -247,6 +274,104 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
       updateJob(job, 'failed', job.progress || 0, 'failed');
     }
   }
+}
+
+function analyzeExportTrace(debugTrace, captureTrace) {
+  const phaseTransitions = [];
+  const stalls = [];
+  const snaps = [];
+  let longestNearFlatMs = 0;
+  let currentFlatStart = null;
+
+  for (let i = 1; i < debugTrace.length; i += 1) {
+    const prev = debugTrace[i - 1];
+    const curr = debugTrace[i];
+    if (curr.phase !== prev.phase) {
+      phaseTransitions.push({
+        atMs: curr.seekMs,
+        from: prev.phase,
+        to: curr.phase,
+      });
+    }
+
+    const dt = Math.max(1, curr.seekMs - prev.seekMs);
+    const delta = computeSignatureDelta(prev.signature, curr.signature);
+    const deltaPerMs = delta / dt;
+
+    if (deltaPerMs < 0.005) {
+      if (currentFlatStart == null) currentFlatStart = prev.seekMs;
+    } else if (currentFlatStart != null) {
+      const durationMs = prev.seekMs - currentFlatStart;
+      if (durationMs >= 180) {
+        stalls.push({
+          startMs: currentFlatStart,
+          endMs: prev.seekMs,
+          durationMs,
+          phase: prev.phase,
+        });
+      }
+      longestNearFlatMs = Math.max(longestNearFlatMs, durationMs);
+      currentFlatStart = null;
+    }
+
+    if (deltaPerMs > 1.2) {
+      snaps.push({
+        atMs: curr.seekMs,
+        phase: curr.phase,
+        delta,
+        deltaPerMs: Number(deltaPerMs.toFixed(4)),
+        signature: curr.signature,
+      });
+    }
+  }
+
+  if (currentFlatStart != null && debugTrace.length) {
+    const last = debugTrace[debugTrace.length - 1];
+    const durationMs = last.seekMs - currentFlatStart;
+    if (durationMs >= 180) {
+      stalls.push({
+        startMs: currentFlatStart,
+        endMs: last.seekMs,
+        durationMs,
+        phase: last.phase,
+      });
+    }
+    longestNearFlatMs = Math.max(longestNearFlatMs, durationMs);
+  }
+
+  return {
+    frameCount: debugTrace.length,
+    captureFrameCount: captureTrace.length,
+    phaseTransitions,
+    longestNearFlatMs,
+    stallCount: stalls.length,
+    snapCount: snaps.length,
+    topStalls: stalls.sort((a, b) => b.durationMs - a.durationMs).slice(0, 8),
+    topSnaps: snaps.sort((a, b) => b.deltaPerMs - a.deltaPerMs).slice(0, 8),
+  };
+}
+
+function computeSignatureDelta(prev = {}, curr = {}) {
+  const weights = {
+    totalTokens: 1 / 1000000,
+    totalCost: 25,
+    totalSessions: 0.5,
+    dailyPoints: 1,
+    lastDailyTotal: 1 / 1000000,
+    topRepoValue: 1 / 1000000,
+    topModelValue: 1 / 1000000,
+  };
+
+  let total = 0;
+  for (const [key, weight] of Object.entries(weights)) {
+    const left = Number.isFinite(prev[key]) ? prev[key] : 0;
+    const right = Number.isFinite(curr[key]) ? curr[key] : 0;
+    total += Math.abs(right - left) * weight;
+  }
+  if ((prev.topRepo || null) !== (curr.topRepo || null)) total += 4;
+  if ((prev.topModel || null) !== (curr.topModel || null)) total += 4;
+  if ((prev.lastDailyDate || null) !== (curr.lastDailyDate || null)) total += 2;
+  return total;
 }
 
 export function createVideoExportManager() {
