@@ -92,7 +92,7 @@ export function createServer(codexHome, opts = {}) {
       return;
     }
 
-    const appBaseUrl = req.get('x-codexmeter-client-base') || opts.frontendBaseUrl || `${req.protocol}://${req.get('host')}`;
+    const appBaseUrl = opts.frontendBaseUrl || `${req.protocol}://${req.get('host')}`;
     const settledEnvelope = state.aggregates ? {
       overview: { data: state.aggregates.overview },
       repos: { data: state.aggregates.repos },
@@ -108,7 +108,7 @@ export function createServer(codexHome, opts = {}) {
         appBaseUrl,
         installPortableBrowser: Boolean(req.body?.install_portable_browser),
       });
-      res.status(202).json(createJobSummary(job, `${req.protocol}://${req.get('host')}`));
+      res.status(202).json(createJobSummary(job));
     } catch (err) {
       res.status(err.statusCode || 500).json({ error: err.message || String(err) });
     }
@@ -120,7 +120,7 @@ export function createServer(codexHome, opts = {}) {
       res.json({ job: null });
       return;
     }
-    res.json({ job: createJobSummary(job, `${req.protocol}://${req.get('host')}`) });
+    res.json({ job: createJobSummary(job) });
   });
 
   app.get('/api/export/support', async (_req, res) => {
@@ -133,7 +133,7 @@ export function createServer(codexHome, opts = {}) {
       res.status(404).json({ error: 'Export job not found.' });
       return;
     }
-    res.json(createJobSummary(job, `${req.protocol}://${req.get('host')}`));
+    res.json(createJobSummary(job));
   });
 
   app.get('/api/export/:jobId/render-data', (req, res) => {

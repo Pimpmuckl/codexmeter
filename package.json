@@ -17,6 +17,7 @@
   "scripts": {
     "dev": "node dev-runner.js",
     "build": "vite build",
+    "test": "node --test test/*.test.js",
     "start": "node bin/codexmeter.js",
     "preview": "npm run build && node bin/codexmeter.js",
     "prepublishOnly": "npm run build"

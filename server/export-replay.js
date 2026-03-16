@@ -30,7 +30,7 @@ export function beginReplayCapture(replay, ingestId, bootstrapPayload) {
   replay.events.push({
     event: 'bootstrap',
     at_ms: 0,
-    payload: clonePayload(bootstrapPayload),
+    payload: bootstrapPayload,
   });
 }
 
@@ -40,7 +40,7 @@ export function recordReplayEvent(replay, event, payload) {
   replay.events.push({
     event,
     at_ms: Math.max(0, Date.now() - replay.started_at_ms),
-    payload: clonePayload(payload),
+    payload,
   });
   if (event === 'complete') {
     replay.active = false;

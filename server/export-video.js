@@ -24,6 +24,7 @@ const EXPORT_TOTAL_DURATION_MS =
 const EXPORT_TAIL_SOURCE_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailSourceFraction ?? 0.035;
 const EXPORT_CRF = OVERVIEW_INGEST_ANIMATION.videoExport?.crf ?? 20;
 const EXPORT_ENCODER_PRESET = OVERVIEW_INGEST_ANIMATION.videoExport?.encoderPreset ?? 'fast';
+const EXPORT_JOB_TTL_MS = 10 * 60 * 1000;
 let portableBrowserSupportCache = null;
 const require = createRequire(import.meta.url);
 
@@ -83,19 +84,23 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         install_portable_browser: Boolean(opts.installPortableBrowser),
         portable_browser_dir: null,
         portable_browser_executable: null,
+        cleanup_timer: null,
+        cleanup_at_ms: 0,
         error: null,
       };
 
       jobs.set(jobId, job);
       void runOverviewVideoJob(job, replay, getBaseUrl);
-      return sanitizeJob(job);
+      return createJobSummary(job);
     },
 
     getJob(jobId) {
+      pruneExpiredJobs();
       return jobs.get(jobId) || null;
     },
 
     listJobs() {
+      pruneExpiredJobs();
       return [...jobs.values()];
     },
 
@@ -123,25 +128,8 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
       };
     },
 
-    sanitizeJob,
+    pruneExpiredJobs,
   };
-
-  function sanitizeJob(job) {
-    if (!job) return null;
-    return {
-      id: job.id,
-      type: job.type,
-      status: job.status,
-      phase: job.phase,
-      progress: job.progress,
-      created_at: job.created_at,
-      updated_at: job.updated_at,
-      replay_ingest_id: job.replay_ingest_id,
-      file_name: job.file_name,
-      download_url: job.status === 'complete' ? `/api/export/${job.id}/file` : null,
-      error: job.error,
-    };
-  }
 
   async function runOverviewVideoJob(job, replay, getBaseUrlFn) {
     let portableBrowserDir = null;
@@ -309,9 +297,11 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         outputHeight: job.height,
       });
       updateJob(job, 'complete', 1, 'complete');
+      scheduleJobCleanup(job);
     } catch (err) {
       job.error = err instanceof Error ? err.message : String(err);
       updateJob(job, 'failed', job.progress || 0, 'failed');
+      scheduleJobCleanup(job);
     } finally {
       if (portableBrowserDir) {
         try {
@@ -320,6 +310,41 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
       }
     }
   }
+
+  function pruneExpiredJobs() {
+    const now = Date.now();
+    for (const job of jobs.values()) {
+      if (job.status === 'queued' || job.status === 'running') continue;
+      if (!job.cleanup_at_ms || job.cleanup_at_ms > now) continue;
+      if (job.cleanup_timer) {
+        clearTimeout(job.cleanup_timer);
+        job.cleanup_timer = null;
+      }
+      jobs.delete(job.id);
+      void cleanupJobArtifacts(job);
+    }
+  }
+
+  function scheduleJobCleanup(job) {
+    if (!job || job.status === 'queued' || job.status === 'running') return;
+    if (job.cleanup_timer) {
+      clearTimeout(job.cleanup_timer);
+      job.cleanup_timer = null;
+    }
+    job.cleanup_at_ms = Date.now() + EXPORT_JOB_TTL_MS;
+    job.cleanup_timer = setTimeout(() => {
+      job.cleanup_timer = null;
+      jobs.delete(job.id);
+      void cleanupJobArtifacts(job);
+    }, EXPORT_JOB_TTL_MS);
+  }
+}
+
+async function cleanupJobArtifacts(job) {
+  if (!job?.temp_dir) return;
+  try {
+    await fs.rm(job.temp_dir, { recursive: true, force: true });
+  } catch {}
 }
 
 function analyzeExportTrace(debugTrace, captureTrace) {
@@ -490,6 +515,7 @@ export function createJobSummary(job) {
     updated_at: job.updated_at,
     replay_ingest_id: job.replay_ingest_id,
     file_name: job.file_name,
+    expires_at: job.cleanup_at_ms ? new Date(job.cleanup_at_ms).toISOString() : null,
     download_url: job.status === 'complete' ? `/api/export/${job.id}/file` : null,
     error: job.error || null,
   };
