@@ -42,6 +42,7 @@ export const api = {
       'x-codexmeter-client-base': window.location.origin,
     },
   }),
+  exportSupport: () => fetchJson('/api/export/support'),
   exportStatus: (jobId) => fetchJson(`/api/export/${encodeURIComponent(jobId)}/status`),
   activeExport: () => fetchJson('/api/export/active'),
   exportRenderData: (jobId) => fetchJson(`/api/export/${encodeURIComponent(jobId)}/render-data`),

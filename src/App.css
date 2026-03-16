@@ -240,6 +240,31 @@ body {
 }
 .range-btn:hover { color: var(--text-secondary); }
 .range-btn.active { color: #fff; background: var(--accent); }
+.range-btn:disabled {
+  cursor: not-allowed;
+}
+.range-btn-unsupported {
+  color: rgba(139, 148, 158, 0.7);
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 1px solid rgba(240, 185, 11, 0.18);
+  position: relative;
+}
+.range-btn-unsupported::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(240, 185, 11, 0.05) 0,
+    rgba(240, 185, 11, 0.05) 6px,
+    rgba(255, 255, 255, 0.01) 6px,
+    rgba(255, 255, 255, 0.01) 12px
+  );
+  pointer-events: none;
+}
+.range-btn-unsupported:disabled {
+  opacity: 0.78;
+}
 
 /* ─── Heatmap ─── */
 .heatmap-wrap {

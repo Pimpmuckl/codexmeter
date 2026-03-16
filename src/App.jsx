@@ -59,6 +59,7 @@ export default function App() {
   const [completionPresentationPending, setCompletionPresentationPending] = useState(false);
   const [exportJob, setExportJob] = useState(null);
   const [startingExport, setStartingExport] = useState(false);
+  const [exportSupport, setExportSupport] = useState({ available: true, reason: null });
   const [displayDateRange, setDisplayDateRange] = useState(null);
   const prevBackendCompleteRef = useRef(false);
   const displayDateAnimationRef = useRef(0);
@@ -116,6 +117,27 @@ export default function App() {
     lastAutoDownloadedExportIdRef.current = exportJob.id;
     window.location.href = api.url(`/api/export/${encodeURIComponent(exportJob.id)}/file`);
   }, [exportJob]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const support = await api.exportSupport();
+        if (alive) setExportSupport(support);
+      } catch (err) {
+        console.error('Export support probe error:', err);
+        if (alive) {
+          setExportSupport({
+            available: false,
+            reason: 'Video export availability could not be detected.',
+          });
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -443,6 +465,13 @@ export default function App() {
     };
   }, [backendComplete, dateRange?.from, dateRange?.to]);
   const exportBusy = startingExport || ['queued', 'running'].includes(exportJob?.status);
+  const exportDisabledReason = !exportSupport?.available
+    ? (exportSupport.reason || 'Video export requires Chrome, Chromium, or Edge.')
+    : !backendComplete
+      ? 'Finish ingest to render the replay video.'
+      : exportBusy
+        ? 'Video export is already running.'
+        : 'Render Overview ingest replay video';
   const exportLabel = exportJob?.status === 'complete'
     ? 'Download MP4'
     : exportBusy
@@ -512,11 +541,11 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  className="range-btn"
+                  className={`range-btn ${!exportSupport?.available ? 'range-btn-unsupported' : ''}`}
                   onClick={exportJob?.status === 'complete' ? handleDownloadOverviewVideo : handleStartOverviewVideoExport}
-                  disabled={!backendComplete || exportBusy}
+                  disabled={!exportSupport?.available || !backendComplete || exportBusy}
                   style={{ minWidth: 110 }}
-                  title="Render Overview ingest replay video"
+                  title={exportJob?.status === 'complete' ? 'Download rendered Overview video' : exportDisabledReason}
                 >
                   {exportLabel}
                 </button>

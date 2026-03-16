@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { attachLiveSubscriber, createIngestState, detachLiveSubscriber, getLatestReplay, restartIngest, runIngest } from './ingest.js';
-import { createJobSummary, createVideoExportManager, getActiveVideoExportJob, getVideoExportJob, startOverviewVideoExport } from './export-video.js';
+import { createJobSummary, createVideoExportManager, getActiveVideoExportJob, getVideoExportJob, getVideoExportSupport, startOverviewVideoExport } from './export-video.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -110,6 +110,10 @@ export function createServer(codexHome, opts = {}) {
       return;
     }
     res.json({ job: createJobSummary(job, `${req.protocol}://${req.get('host')}`) });
+  });
+
+  app.get('/api/export/support', (_req, res) => {
+    res.json(getVideoExportSupport());
   });
 
   app.get('/api/export/:jobId/status', (req, res) => {

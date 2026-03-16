@@ -426,6 +426,22 @@ export function getActiveVideoExportJob(manager) {
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0] || null;
 }
 
+export function getVideoExportSupport() {
+  const browserPath = findSupportedBrowserExecutable();
+  if (browserPath) {
+    return {
+      available: true,
+      browser_path: browserPath,
+      reason: null,
+    };
+  }
+  return {
+    available: false,
+    browser_path: null,
+    reason: 'No supported Chrome/Chromium/Edge browser was found for video export.',
+  };
+}
+
 export function createJobSummary(job) {
   if (!job) return null;
   return {
@@ -451,6 +467,15 @@ function updateJob(job, phase, progress, status) {
 }
 
 async function detectBrowserExecutable() {
+  const browserPath = findSupportedBrowserExecutable();
+  if (browserPath) return browserPath;
+
+  const err = new Error('No supported Chrome/Chromium/Edge executable was found for video export.');
+  err.statusCode = 500;
+  throw err;
+}
+
+function findSupportedBrowserExecutable() {
   if (process.env.CODEXMETER_EXPORT_BROWSER && fsSync.existsSync(process.env.CODEXMETER_EXPORT_BROWSER)) {
     return process.env.CODEXMETER_EXPORT_BROWSER;
   }
@@ -477,10 +502,7 @@ async function detectBrowserExecutable() {
   for (const candidate of candidates.filter(Boolean)) {
     if (fsSync.existsSync(candidate)) return candidate;
   }
-
-  const err = new Error('No supported Chrome/Chromium/Edge executable was found for video export.');
-  err.statusCode = 500;
-  throw err;
+  return null;
 }
 
 async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, frameCount, durationMs, crf, encoderPreset, outputWidth, outputHeight }) {
