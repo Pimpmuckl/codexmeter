@@ -36,7 +36,7 @@ npx codexmeter@latest --repo my-project --agent-family review
 - **Models** — Token and cost per model, thinking-level breakdown
 - **Daily Usage** — Tokens, wall-clock time, and cost per day, stacked by model
 - **Sessions** — Searchable table with repo, model, role, duration, tokens
-- **Export** — PNG export for charts
+- **Export** — PNG chart export and Overview ingest video clips
 
 Data is read from `state_5.sqlite`, `logs_1.sqlite`, and rollout JSONL under `.codex`. No separate cache DB; ingestion runs on each launch.
 
@@ -44,6 +44,7 @@ Data is read from `state_5.sqlite`, `logs_1.sqlite`, and rollout JSONL under `.c
 
 - Node.js 18+
 - A `.codex` directory (from Codex CLI usage)
+- Chrome, Chromium, or Edge for video export, or let CodexMeter download a single-use portable browser from the UI
 
 ## Development
 
