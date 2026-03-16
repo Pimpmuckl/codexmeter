@@ -398,8 +398,17 @@ export function OverviewFrame({
       avoidLabelOverlap: !familySingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
-      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
-      labelLine: { lineStyle: { color: '#30363d' } },
+      label: {
+        show: true,
+        color: '#8b949e',
+        fontSize: 11,
+        formatter: '{b}',
+        alignTo: 'edge',
+        edgeDistance: 5,
+        bleedMargin: 5,
+        distanceToLabelLine: 5,
+      },
+      labelLine: { lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
       ...(familySingleLabelLayout ? { labelLayout: familySingleLabelLayout } : {}),
       data: buildOverviewDonutRows(visibleFamilyRows, getFamilyColor),
@@ -429,8 +438,17 @@ export function OverviewFrame({
       avoidLabelOverlap: !modelSingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
-      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
-      labelLine: { lineStyle: { color: '#30363d' } },
+      label: {
+        show: true,
+        color: '#8b949e',
+        fontSize: 11,
+        formatter: '{b}',
+        alignTo: 'edge',
+        edgeDistance: 5,
+        bleedMargin: 5,
+        distanceToLabelLine: 5,
+      },
+      labelLine: { lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
       ...(modelSingleLabelLayout ? { labelLayout: modelSingleLabelLayout } : {}),
       data: buildOverviewDonutRows(visibleModelRows, getModelColor),
@@ -468,7 +486,7 @@ export function OverviewFrame({
       <Heatmap heatmapData={presentation.heatmap} isIngestActive={isIngestActive} ingestProgress={ingestProgress} />
 
       <div className="grid-3">
-        <div className="chart-card">
+        <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Top Repos</div>
           {topRepos.length > 0 ? (
             <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode} />
@@ -476,7 +494,7 @@ export function OverviewFrame({
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
         </div>
-        <div className="chart-card">
+        <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
             <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={true} />

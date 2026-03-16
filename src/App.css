@@ -343,6 +343,13 @@ body {
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem; min-width: 0; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; min-width: 0; }
 .grid-3 > .chart-card { min-width: 0; overflow: hidden; }
+.grid-3 > .overview-donut-card {
+  overflow: visible;
+}
+.overview-donut-card .echarts-for-react,
+.overview-donut-card .echarts-for-react > div {
+  overflow: visible !important;
+}
 @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } .grid-3 { grid-template-columns: 1fr; } }
 
 /* ─── Buttons ─── */
