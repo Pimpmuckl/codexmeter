@@ -82,7 +82,7 @@ export function buildLiveBootstrap(live) {
 export function buildLivePatch(live, patch) {
   return {
     overview: Object.fromEntries(
-      [...patch.overview].map((rangeKey) => [rangeKey, serializeOverviewBucket(live.overview[rangeKey])])
+      [...patch.overview].map((rangeKey) => [rangeKey, serializeOverviewBucket(live.overview[rangeKey], live.lowerBounds[rangeKey])])
     ),
     repos: serializePatchedTopRanges(live.repos, live.repoTopKeys, patch.repos, serializeRepoSummary),
     models: serializePatchedTopRanges(live.models, live.modelTopKeys, patch.models, serializeModelSummary),
@@ -352,14 +352,17 @@ function ensureHeatmapDay(dayMap, dayKey) {
 
 function serializeOverview(live) {
   return {
-    total: serializeOverviewBucket(live.overview.total),
-    d7: serializeOverviewBucket(live.overview.d7),
-    d30: serializeOverviewBucket(live.overview.d30),
+    total: serializeOverviewBucket(live.overview.total, live.lowerBounds.total),
+    d7: serializeOverviewBucket(live.overview.d7, live.lowerBounds.d7),
+    d30: serializeOverviewBucket(live.overview.d30, live.lowerBounds.d30),
     cost_assumptions: CACHE_ASSUMPTIONS,
   };
 }
 
-function serializeOverviewBucket(bucket) {
+function serializeOverviewBucket(bucket, lowerBound = 0) {
+  const boundedFrom = bucket.earliest === Infinity
+    ? null
+    : Math.max(bucket.earliest, lowerBound || 0);
   return {
     total_tokens: bucket.total_tokens,
     total_cost: bucket.total_cost,
@@ -368,7 +371,7 @@ function serializeOverviewBucket(bucket) {
     active_models: bucket.modelSet.size,
     total_elapsed_seconds: bucket.total_elapsed_seconds,
     date_range: {
-      from: bucket.earliest === Infinity ? null : bucket.earliest,
+      from: boundedFrom,
       to: bucket.latest === -Infinity ? null : bucket.latest,
     },
     coverage: {

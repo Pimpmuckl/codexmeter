@@ -163,8 +163,9 @@ export default function Models({ data, range = 'total', chartMode = 'default' })
   if (!models?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
   const reversed = [...models].reverse();
   const maxTokens = Math.max(...models.map((model) => model.tokens || 0), 0);
+  const chartHeight = Math.max(180, models.length * 34);
 
-  const option = {
+  const option = useMemo(() => ({
     backgroundColor: 'transparent',
     ...ECHARTS_ANIMATION,
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, appendToBody: true, confine: true, formatter: p => {
@@ -185,15 +186,28 @@ export default function Models({ data, range = 'total', chartMode = 'default' })
     },
     yAxis: { type: 'category', data: reversed.map(m => m.model_name), axisLabel: { color: '#8b949e', fontSize: 11 }, axisTick: { show: false }, axisLine: { show: false } },
     series: [{
+      id: 'models-range-bars',
       type: 'bar',
+      universalTransition: true,
       data: reversed.map(m => ({
+        id: m.model_name,
+        name: m.model_name,
         value: m.tokens,
         itemStyle: { color: getModelColor(m.model_name), borderRadius: [0, 3, 3, 0] },
       })),
       barMaxWidth: 18,
       label: { show: true, position: 'right', formatter: p => fmt(p.value ?? 0), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
     }],
-  };
+  }), [maxTokens, models, reversed]);
+
+  const chartEvents = useMemo(() => ({
+    click: (params) => {
+      if (params?.componentType === 'series' && params?.dataIndex != null) {
+        const m = models[models.length - 1 - params.dataIndex];
+        if (m) setExpanded((current) => current === m.model_name ? null : m.model_name);
+      }
+    },
+  }), [models]);
 
   return (
     <div className="animate-in">
@@ -203,23 +217,18 @@ export default function Models({ data, range = 'total', chartMode = 'default' })
 
       <div className="chart-card">
         <button className="export-btn" onClick={() => exportChart(chartRef)}>PNG</button>
-        <ReactEChartsCore
-          ref={chartRef}
-          echarts={echarts}
-          option={option}
-          style={{ height: Math.max(180, models.length * 34) }}
-          theme="dark"
-          lazyUpdate={true}
-          notMerge={false}
-          onEvents={{
-            click: (params) => {
-              if (params?.componentType === 'series' && params?.dataIndex != null) {
-                const m = models[models.length - 1 - params.dataIndex];
-                if (m) setExpanded(expanded === m.model_name ? null : m.model_name);
-              }
-            },
-          }}
-        />
+        <div style={{ height: chartHeight, transition: 'height 220ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+          <ReactEChartsCore
+            ref={chartRef}
+            echarts={echarts}
+            option={option}
+            style={{ height: '100%' }}
+            theme="dark"
+            lazyUpdate={true}
+            notMerge={false}
+            onEvents={chartEvents}
+          />
+        </div>
       </div>
 
       <div className="table-wrap">
