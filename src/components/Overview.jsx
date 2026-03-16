@@ -15,6 +15,7 @@ import {
   OVERVIEW_PRESENTATION_DURATION_MS,
 } from '../utils/animationsDefault';
 import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
+import { buildOverviewPresentationTarget } from '../utils/overviewPresentation';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
 
@@ -303,6 +304,9 @@ export function OverviewFrame({
   const chartPresentation = exportPlayback && exportPhase === 'replay' && rawPresentation?.ready
     ? rawPresentation
     : presentation;
+  const heatmapPresentation = (isIngestActive && rawPresentation?.heatmap)
+    ? rawPresentation.heatmap
+    : presentation.heatmap;
   const { stats, topRepos, topFamilies, topModels } = presentation;
   const chartTopRepos = chartPresentation.topRepos || [];
   const chartTopFamilies = chartPresentation.topFamilies || [];
@@ -483,7 +487,7 @@ export function OverviewFrame({
         <DailySpark daily={presentation.daily} exportMode={exportMode} />
       </div>
 
-      <Heatmap heatmapData={presentation.heatmap} isIngestActive={isIngestActive} ingestProgress={ingestProgress} />
+      <Heatmap heatmapData={heatmapPresentation} isIngestActive={isIngestActive} ingestProgress={ingestProgress} />
 
       <div className="grid-3">
         <div className="chart-card overview-donut-card">
@@ -557,10 +561,15 @@ function Overview({
       clockNowMs,
     }
   );
+  const rawPresentation = React.useMemo(
+    () => buildOverviewPresentationTarget({ overview: data, heatmap, daily, families, repos, models, range }),
+    [data, heatmap, daily, families, repos, models, range]
+  );
 
   return (
     <OverviewFrame
       presentation={presentation}
+      rawPresentation={rawPresentation}
       ingestProgress={ingestProgress}
       isIngestActive={isIngestActive}
     />
