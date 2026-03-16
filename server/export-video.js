@@ -15,15 +15,12 @@ const EXPORT_HEIGHT = OVERVIEW_INGEST_ANIMATION.videoExport?.height ?? 864;
 const EXPORT_FPS = OVERVIEW_INGEST_ANIMATION.videoExport?.fps ?? 60;
 const EXPORT_SUPERSAMPLE_SCALE = Math.max(1, Number(OVERVIEW_INGEST_ANIMATION.videoExport?.supersampleScale ?? 1) || 1);
 const EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT = Math.max(0, Math.round(OVERVIEW_INGEST_ANIMATION.videoExport?.frontloadSettledFrameCount ?? 1));
-const EXPORT_FRONTLOAD_SETTLED_DURATION_MS = EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT > 0
-  ? Math.max(1, Math.round((EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT * 1000) / Math.max(EXPORT_FPS, 1)))
-  : 0;
 const EXPORT_START_HOLD_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.startHoldDurationMs ?? 500;
 const EXPORT_REPLAY_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.replayDurationMs ?? 8000;
 const EXPORT_TAIL_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.tailDurationMs ?? 5000;
 const EXPORT_FINAL_HOLD_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.finalHoldDurationMs ?? 3500;
 const EXPORT_TOTAL_DURATION_MS =
-  EXPORT_FRONTLOAD_SETTLED_DURATION_MS + EXPORT_START_HOLD_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS + EXPORT_FINAL_HOLD_DURATION_MS;
+  EXPORT_START_HOLD_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS + EXPORT_FINAL_HOLD_DURATION_MS;
 const EXPORT_TAIL_SOURCE_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailSourceFraction ?? 0.035;
 const EXPORT_CRF = OVERVIEW_INGEST_ANIMATION.videoExport?.crf ?? 20;
 const EXPORT_ENCODER_PRESET = OVERVIEW_INGEST_ANIMATION.videoExport?.encoderPreset ?? 'fast';
@@ -67,7 +64,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         fps: EXPORT_FPS,
         supersample_scale: EXPORT_SUPERSAMPLE_SCALE,
         frontload_settled_frame_count: EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT,
-        frontload_settled_duration_ms: EXPORT_FRONTLOAD_SETTLED_DURATION_MS,
+        frontload_settled_duration_ms: 0,
         start_hold_duration_ms: EXPORT_START_HOLD_DURATION_MS,
         replay_duration_ms: EXPORT_REPLAY_DURATION_MS,
         tail_duration_ms: EXPORT_TAIL_DURATION_MS,
@@ -266,6 +263,14 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         if (frameIndex < 2) {
           throw new Error('Screencast capture produced too few frames');
         }
+        if (job.frontload_settled_frame_count > 0) {
+          await prependSettledFrames(job.frames_dir, {
+            frameCount: frameIndex,
+            prependCount: job.frontload_settled_frame_count,
+            extension: frameExt,
+          });
+          frameIndex += job.frontload_settled_frame_count;
+        }
         capturedFrameCount = frameIndex;
         const exportDebug = await page.evaluate(() => ({
           debugState: window.__CODEXMETER_EXPORT__?.getDebugState?.() || null,
@@ -297,7 +302,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         captureFormat: job.capture_format,
         fps: job.fps,
         frameCount: capturedFrameCount,
-        durationMs: job.duration_ms,
+        durationMs: job.duration_ms + Math.round((job.frontload_settled_frame_count * 1000) / Math.max(job.fps || 1, 1)),
         crf: job.crf,
         encoderPreset: job.encoder_preset,
         outputWidth: job.width,
@@ -745,4 +750,21 @@ async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, fr
       else reject(new Error(stderr || `ffmpeg exited with code ${code}`));
     });
   });
+}
+
+async function prependSettledFrames(framesDir, { frameCount, prependCount, extension }) {
+  if (!prependCount || frameCount <= 0) return;
+  const safePrependCount = Math.max(0, Math.round(prependCount));
+  if (!safePrependCount) return;
+  const lastFramePath = path.join(framesDir, `${String(frameCount - 1).padStart(5, '0')}.${extension}`);
+  const settledFrameBytes = await fs.readFile(lastFramePath);
+  for (let index = frameCount - 1; index >= 0; index -= 1) {
+    const sourcePath = path.join(framesDir, `${String(index).padStart(5, '0')}.${extension}`);
+    const targetPath = path.join(framesDir, `${String(index + safePrependCount).padStart(5, '0')}.${extension}`);
+    await fs.rename(sourcePath, targetPath);
+  }
+  for (let index = 0; index < safePrependCount; index += 1) {
+    const targetPath = path.join(framesDir, `${String(index).padStart(5, '0')}.${extension}`);
+    await fs.writeFile(targetPath, settledFrameBytes);
+  }
 }
