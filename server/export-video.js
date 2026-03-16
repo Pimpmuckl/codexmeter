@@ -11,6 +11,7 @@ import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 const EXPORT_WIDTH = OVERVIEW_INGEST_ANIMATION.videoExport?.width ?? 1080;
 const EXPORT_HEIGHT = OVERVIEW_INGEST_ANIMATION.videoExport?.height ?? 864;
 const EXPORT_FPS = OVERVIEW_INGEST_ANIMATION.videoExport?.fps ?? 60;
+const EXPORT_SUPERSAMPLE_SCALE = Math.max(1, Number(OVERVIEW_INGEST_ANIMATION.videoExport?.supersampleScale ?? 1) || 1);
 const EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT = Math.max(0, Math.round(OVERVIEW_INGEST_ANIMATION.videoExport?.frontloadSettledFrameCount ?? 1));
 const EXPORT_FRONTLOAD_SETTLED_DURATION_MS = EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT > 0
   ? Math.max(1, Math.round((EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT * 1000) / Math.max(EXPORT_FPS, 1)))
@@ -58,6 +59,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         width: EXPORT_WIDTH,
         height: EXPORT_HEIGHT,
         fps: EXPORT_FPS,
+        supersample_scale: EXPORT_SUPERSAMPLE_SCALE,
         frontload_settled_frame_count: EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT,
         frontload_settled_duration_ms: EXPORT_FRONTLOAD_SETTLED_DURATION_MS,
         start_hold_duration_ms: EXPORT_START_HOLD_DURATION_MS,
@@ -99,6 +101,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         width: job.width,
         height: job.height,
         fps: job.fps,
+        supersampleScale: job.supersample_scale,
         frontloadSettledFrameCount: job.frontload_settled_frame_count,
         frontloadSettledDurationMs: job.frontload_settled_duration_ms,
         durationMs: job.duration_ms,
@@ -156,7 +159,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
       try {
         const context = await browser.newContext({
           viewport: { width: job.width, height: job.height },
-          deviceScaleFactor: 1,
+          deviceScaleFactor: job.supersample_scale || 1,
         });
         const page = await context.newPage();
         const cdp = await context.newCDPSession(page);
@@ -275,6 +278,8 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         durationMs: job.duration_ms,
         crf: job.crf,
         encoderPreset: job.encoder_preset,
+        outputWidth: job.width,
+        outputHeight: job.height,
       });
       updateJob(job, 'complete', 1, 'complete');
     } catch (err) {
@@ -478,7 +483,7 @@ async function detectBrowserExecutable() {
   throw err;
 }
 
-async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, frameCount, durationMs, crf, encoderPreset }) {
+async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, frameCount, durationMs, crf, encoderPreset, outputWidth, outputHeight }) {
   const extension = captureFormat === 'jpeg' ? 'jpg' : 'png';
   const inputPattern = path.join(framesDir, `%05d.${extension}`);
   if (!ffmpegPath) {
@@ -497,6 +502,7 @@ async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, fr
       '-preset', String(encoderPreset || 'fast'),
       '-crf', String(crf ?? 20),
       '-profile:v', 'high',
+      '-vf', `scale=${Math.max(1, outputWidth || EXPORT_WIDTH)}:${Math.max(1, outputHeight || EXPORT_HEIGHT)}:flags=lanczos`,
       '-r', String(fps),
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',

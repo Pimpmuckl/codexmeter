@@ -114,9 +114,10 @@ export const OVERVIEW_INGEST_ANIMATION = {
     donutsChartTailUpdateDurationMs: 240,
 
     // Render settings
+    supersampleScale: 2,
     captureFormat: 'png',
     jpegQuality: 92,
-    crf: 10,
+    crf: 5,
     encoderPreset: 'veryfast',
   },
 };
