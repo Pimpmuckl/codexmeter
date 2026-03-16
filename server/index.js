@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createServer(codexHome, opts = {}) {
   const app = express();
+  app.use(express.json());
   const state = createIngestState();
   const exportManager = createVideoExportManager();
   const distDir = path.join(__dirname, '..', 'dist');
@@ -80,6 +81,11 @@ export function createServer(codexHome, opts = {}) {
   app.get('/api/families', wrap('families'));
 
   app.post('/api/export/overview-video', async (req, res) => {
+    const activeJob = getActiveVideoExportJob(exportManager);
+    if (activeJob) {
+      res.status(409).json({ error: 'Another export job is already running.' });
+      return;
+    }
     const replay = getLatestReplay(state);
     if (!replay) {
       res.status(409).json({ error: 'No completed ingest replay is available yet.' });
@@ -96,7 +102,12 @@ export function createServer(codexHome, opts = {}) {
       heatmap: { data: state.aggregates.heatmap },
     } : null;
     try {
-      const job = await startOverviewVideoExport(exportManager, { replay, settledEnvelope, appBaseUrl });
+      const job = await startOverviewVideoExport(exportManager, {
+        replay,
+        settledEnvelope,
+        appBaseUrl,
+        installPortableBrowser: Boolean(req.body?.install_portable_browser),
+      });
       res.status(202).json(createJobSummary(job, `${req.protocol}://${req.get('host')}`));
     } catch (err) {
       res.status(err.statusCode || 500).json({ error: err.message || String(err) });
@@ -112,8 +123,8 @@ export function createServer(codexHome, opts = {}) {
     res.json({ job: createJobSummary(job, `${req.protocol}://${req.get('host')}`) });
   });
 
-  app.get('/api/export/support', (_req, res) => {
-    res.json(getVideoExportSupport());
+  app.get('/api/export/support', async (_req, res) => {
+    res.json(await getVideoExportSupport());
   });
 
   app.get('/api/export/:jobId/status', (req, res) => {

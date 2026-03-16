@@ -59,7 +59,8 @@ export default function App() {
   const [completionPresentationPending, setCompletionPresentationPending] = useState(false);
   const [exportJob, setExportJob] = useState(null);
   const [startingExport, setStartingExport] = useState(false);
-  const [exportSupport, setExportSupport] = useState({ available: true, reason: null });
+  const [portableDownloadPending, setPortableDownloadPending] = useState(false);
+  const [exportSupport, setExportSupport] = useState({ available: true, reason: null, portable_download: null });
   const [displayDateRange, setDisplayDateRange] = useState(null);
   const prevBackendCompleteRef = useRef(false);
   const displayDateAnimationRef = useRef(0);
@@ -94,17 +95,41 @@ export default function App() {
   }, [rerunning]);
 
   const handleStartOverviewVideoExport = useCallback(async () => {
-    if (startingExport) return;
+    if (startingExport || ['queued', 'running'].includes(exportJob?.status)) return;
     try {
       setStartingExport(true);
-      const job = await api.startOverviewVideoExport();
+      const canUsePortableBrowser = !exportSupport?.available && exportSupport?.portable_download?.available;
+      let installPortableBrowser = false;
+      if (canUsePortableBrowser) {
+        const sizeHint = exportSupport.portable_download.approx_size_mb
+          ? `about ${exportSupport.portable_download.approx_size_mb} MB`
+          : 'a fairly large download';
+        const confirmed = window.confirm(
+          `No supported browser was found for video export.\n\nCodexMeter can download a single-use portable Chromium bundle (${sizeHint}) for this export only, then delete it afterward.\n\nDo you want to continue?`
+        );
+        if (!confirmed) return;
+        installPortableBrowser = true;
+        setPortableDownloadPending(true);
+      }
+      const job = await api.startOverviewVideoExport(
+        installPortableBrowser ? { install_portable_browser: true } : {}
+      );
       setExportJob(job);
     } catch (err) {
       console.error('Video export error:', err);
     } finally {
       setStartingExport(false);
     }
-  }, [startingExport]);
+  }, [exportJob?.status, exportSupport, startingExport]);
+
+  useEffect(() => {
+    if (!portableDownloadPending) return;
+    if (!exportJob) return;
+    if (exportJob.phase === 'downloading_browser') return;
+    if (exportJob.phase === 'rendering' || exportJob.phase === 'encoding' || exportJob.status === 'complete' || exportJob.status === 'failed') {
+      setPortableDownloadPending(false);
+    }
+  }, [exportJob, portableDownloadPending]);
 
   const handleDownloadOverviewVideo = useCallback(() => {
     if (!exportJob?.id || exportJob.status !== 'complete') return;
@@ -130,6 +155,7 @@ export default function App() {
           setExportSupport({
             available: false,
             reason: 'Video export availability could not be detected.',
+            portable_download: null,
           });
         }
       }
@@ -465,8 +491,17 @@ export default function App() {
     };
   }, [backendComplete, dateRange?.from, dateRange?.to]);
   const exportBusy = startingExport || ['queued', 'running'].includes(exportJob?.status);
-  const exportDisabledReason = !exportSupport?.available
+  const exportNeedsPortableBrowser = !exportSupport?.available && exportSupport?.portable_download?.available;
+  const exportDisabledReason = portableDownloadPending
+    ? 'Downloading single-use portable Chromium for this export.'
+    : exportNeedsPortableBrowser && startingExport
+    ? 'Downloading single-use portable Chromium for this export.'
+    : exportNeedsPortableBrowser && exportJob?.phase === 'downloading_browser'
+      ? 'Downloading single-use portable Chromium for this export.'
+    : !exportSupport?.available && !exportNeedsPortableBrowser
     ? (exportSupport.reason || 'Video export requires Chrome, Chromium, or Edge.')
+    : exportNeedsPortableBrowser
+      ? 'No supported browser found. Click to download a single-use portable Chromium for this export.'
     : !backendComplete
       ? 'Finish ingest to render the replay video.'
       : exportBusy
@@ -474,6 +509,8 @@ export default function App() {
         : 'Render Overview ingest replay video';
   const exportLabel = exportJob?.status === 'complete'
     ? 'Download MP4'
+    : portableDownloadPending || exportBusy && (startingExport && exportNeedsPortableBrowser || exportJob?.phase === 'downloading_browser')
+      ? `Downloading ${Math.max(1, Math.round((exportJob?.progress || 0.03) * 100))}%`
     : exportBusy
       ? `Rendering ${Math.max(1, Math.round((exportJob?.progress || 0) * 100))}%`
       : 'Render Video';
@@ -541,9 +578,9 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  className={`range-btn ${!exportSupport?.available ? 'range-btn-unsupported' : ''}`}
+                  className={`navbar-tab active export-video-btn ${!exportSupport?.available ? 'range-btn-unsupported' : ''}`}
                   onClick={exportJob?.status === 'complete' ? handleDownloadOverviewVideo : handleStartOverviewVideoExport}
-                  disabled={!exportSupport?.available || !backendComplete || exportBusy}
+                  disabled={(!exportSupport?.available && !exportNeedsPortableBrowser) || !backendComplete || exportBusy}
                   style={{ minWidth: 110 }}
                   title={exportJob?.status === 'complete' ? 'Download rendered Overview video' : exportDisabledReason}
                 >

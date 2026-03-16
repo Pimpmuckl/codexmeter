@@ -4,6 +4,8 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
+import process from 'process';
+import { createRequire } from 'module';
 import ffmpegPath from 'ffmpeg-static';
 import { chromium } from 'playwright-core';
 import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
@@ -25,12 +27,14 @@ const EXPORT_TOTAL_DURATION_MS =
 const EXPORT_TAIL_SOURCE_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailSourceFraction ?? 0.035;
 const EXPORT_CRF = OVERVIEW_INGEST_ANIMATION.videoExport?.crf ?? 20;
 const EXPORT_ENCODER_PRESET = OVERVIEW_INGEST_ANIMATION.videoExport?.encoderPreset ?? 'fast';
+let portableBrowserSupportCache = null;
+const require = createRequire(import.meta.url);
 
 export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl }) {
   const jobs = new Map();
 
   return {
-    async startOverviewVideoJob(clientBaseUrl) {
+    async startOverviewVideoJob(clientBaseUrl, opts = {}) {
       const replay = getReplay();
       const settledEnvelope = getSettledEnvelope ? getSettledEnvelope() : null;
       if (!replay?.bootstrap) {
@@ -45,12 +49,14 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
       const outputPath = path.join(tempDir, 'codexmeter-overview.mp4');
       await fs.mkdir(framesDir, { recursive: true });
 
+      const initialBrowserPath = findSupportedBrowserExecutable();
+      const willDownloadPortableBrowser = Boolean(opts.installPortableBrowser) && !initialBrowserPath;
       const job = {
         id: jobId,
         type: 'overview-video',
-        status: 'queued',
-        phase: 'preparing',
-        progress: 0,
+        status: willDownloadPortableBrowser ? 'running' : 'queued',
+        phase: willDownloadPortableBrowser ? 'downloading_browser' : 'preparing',
+        progress: willDownloadPortableBrowser ? 0.03 : 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         replay_ingest_id: replay.ingest_id,
@@ -77,6 +83,9 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         output_path: outputPath,
         file_name: `codexmeter-overview-${jobId.slice(0, 8)}.mp4`,
         client_base_url: clientBaseUrl || null,
+        install_portable_browser: Boolean(opts.installPortableBrowser),
+        portable_browser_dir: null,
+        portable_browser_executable: null,
         error: null,
       };
 
@@ -138,11 +147,24 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
   }
 
   async function runOverviewVideoJob(job, replay, getBaseUrlFn) {
+    let portableBrowserDir = null;
     try {
-      updateJob(job, 'rendering', 0.02, 'running');
-
       const baseUrl = await getBaseUrlFn(job.client_base_url);
-      const browserPath = await detectBrowserExecutable();
+      let browserPath = findSupportedBrowserExecutable();
+      if (!browserPath && job.install_portable_browser) {
+        updateJob(job, 'downloading_browser', 0.03, 'running');
+        const portableBrowser = await installSingleUsePortableBrowser(job.temp_dir, (percent) => {
+          updateJob(job, 'downloading_browser', 0.03 + (Math.max(0, Math.min(percent, 100)) / 100) * 0.22, 'running');
+        });
+        portableBrowserDir = portableBrowser.dir;
+        job.portable_browser_dir = portableBrowser.dir;
+        job.portable_browser_executable = portableBrowser.executablePath;
+        browserPath = portableBrowser.executablePath;
+      }
+      if (!browserPath) {
+        await detectBrowserExecutable();
+      }
+      updateJob(job, 'rendering', Math.max(job.progress || 0, 0.24), 'running');
       const browser = await chromium.launch({
         headless: true,
         executablePath: browserPath,
@@ -285,6 +307,12 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
     } catch (err) {
       job.error = err instanceof Error ? err.message : String(err);
       updateJob(job, 'failed', job.progress || 0, 'failed');
+    } finally {
+      if (portableBrowserDir) {
+        try {
+          await fs.rm(portableBrowserDir, { recursive: true, force: true });
+        } catch {}
+      }
     }
   }
 }
@@ -408,11 +436,11 @@ export function createVideoExportManager() {
   return manager;
 }
 
-export function startOverviewVideoExport(manager, { replay, settledEnvelope, appBaseUrl }) {
+export function startOverviewVideoExport(manager, { replay, settledEnvelope, appBaseUrl, installPortableBrowser = false }) {
   manager.setReplayGetter(() => replay);
   manager.setSettledEnvelopeGetter(() => settledEnvelope);
   manager.setBaseUrlResolver(async (clientBaseUrl) => clientBaseUrl || appBaseUrl);
-  return manager.startOverviewVideoJob(appBaseUrl);
+  return manager.startOverviewVideoJob(appBaseUrl, { installPortableBrowser });
 }
 
 export function getVideoExportJob(manager, jobId) {
@@ -426,19 +454,22 @@ export function getActiveVideoExportJob(manager) {
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0] || null;
 }
 
-export function getVideoExportSupport() {
+export async function getVideoExportSupport() {
   const browserPath = findSupportedBrowserExecutable();
   if (browserPath) {
     return {
       available: true,
       browser_path: browserPath,
       reason: null,
+      portable_download: null,
     };
   }
+  const portableDownload = await getPortableBrowserSupport();
   return {
     available: false,
     browser_path: null,
     reason: 'No supported Chrome/Chromium/Edge browser was found for video export.',
+    portable_download: portableDownload,
   };
 }
 
@@ -475,7 +506,178 @@ async function detectBrowserExecutable() {
   throw err;
 }
 
+async function getPortableBrowserSupport() {
+  if (process.env.CODEXMETER_EXPORT_DEBUG_DISABLE_PORTABLE === '1') {
+    return {
+      available: false,
+      label: null,
+      approx_size_mb: null,
+      reason: 'Portable browser download disabled by debug flag.',
+      platform_id: getPortableBrowserPlatformId(),
+    };
+  }
+  if (portableBrowserSupportCache) return portableBrowserSupportCache;
+  const platformId = getPortableBrowserPlatformId();
+  if (!platformId) {
+    portableBrowserSupportCache = {
+      available: false,
+      label: null,
+      approx_size_mb: null,
+      reason: `Portable browser download is not supported on ${process.platform}/${process.arch}.`,
+      platform_id: null,
+    };
+    return portableBrowserSupportCache;
+  }
+
+  try {
+    const spec = await resolvePortableBrowserSpec();
+    portableBrowserSupportCache = {
+      available: true,
+      label: spec.label,
+      approx_size_mb: spec.approxSizeMb,
+      reason: null,
+      platform_id: spec.platformId,
+    };
+    return portableBrowserSupportCache;
+  } catch (err) {
+    portableBrowserSupportCache = {
+      available: false,
+      label: null,
+      approx_size_mb: null,
+      reason: err instanceof Error ? err.message : String(err),
+      platform_id: platformId,
+    };
+    return portableBrowserSupportCache;
+  }
+}
+
+async function resolvePortableBrowserSpec() {
+  const platformId = getPortableBrowserPlatformId();
+  if (!platformId) {
+    throw new Error(`Portable browser download is not supported on ${process.platform}/${process.arch}.`);
+  }
+  const probeRoot = path.join(os.tmpdir(), 'codexmeter-playwright-probe');
+  const cliPath = resolvePlaywrightCliPath();
+  const dryRun = await runNodeCommand(cliPath, ['install', 'chromium-headless-shell', '--dry-run'], {
+    PLAYWRIGHT_BROWSERS_PATH: probeRoot,
+  });
+  const output = `${dryRun.stdout}\n${dryRun.stderr}`;
+  const urls = [...output.matchAll(/Download url:\s+(\S+)/g)].map((match) => match[1]).filter(Boolean);
+  if (!urls.length) {
+    throw new Error('Could not resolve portable Chromium download URL.');
+  }
+  const approxSizeMb = await fetchCombinedContentLengthMb(urls);
+  return {
+    browser: 'chromium-headless-shell',
+    label: 'Portable Chromium',
+    platformId,
+    downloadUrls: urls,
+    approxSizeMb,
+  };
+}
+
+async function installSingleUsePortableBrowser(jobTempDir, onProgress = null) {
+  const browserRoot = path.join(jobTempDir, 'portable-browser');
+  const cliPath = resolvePlaywrightCliPath();
+  await fs.mkdir(browserRoot, { recursive: true });
+  await runNodeCommand(cliPath, ['install', 'chromium-headless-shell'], {
+    PLAYWRIGHT_BROWSERS_PATH: browserRoot,
+  }, onProgress);
+  const executablePath = await findPortableBrowserExecutable(browserRoot);
+  if (!executablePath) {
+    throw new Error('Portable Chromium was downloaded but no executable was found.');
+  }
+  return { dir: browserRoot, executablePath };
+}
+
+function getPortableBrowserPlatformId() {
+  if (process.platform === 'win32' && process.arch === 'x64') return 'win64';
+  if (process.platform === 'darwin' && process.arch === 'arm64') return 'mac-arm64';
+  if (process.platform === 'darwin' && process.arch === 'x64') return 'mac-x64';
+  if (process.platform === 'linux' && process.arch === 'x64') return 'linux64';
+  return null;
+}
+
+async function fetchCombinedContentLengthMb(urls) {
+  try {
+    let totalBytes = 0;
+    for (const url of urls) {
+      const res = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+      const length = Number(res.headers.get('content-length') || 0);
+      if (!Number.isFinite(length) || length <= 0) return null;
+      totalBytes += length;
+    }
+    return Math.max(1, Math.round(totalBytes / (1024 * 1024)));
+  } catch {
+    return null;
+  }
+}
+
+async function runNodeCommand(scriptPath, args, extraEnv = {}, onProgress = null) {
+  return await new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: process.cwd(),
+      env: { ...process.env, ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    const handleChunk = (chunk) => {
+      const text = chunk.toString();
+      const matches = [...text.matchAll(/(\d{1,3})%/g)];
+      if (onProgress && matches.length) {
+        const lastMatch = matches[matches.length - 1];
+        const percent = Math.max(0, Math.min(100, Number(lastMatch[1]) || 0));
+        onProgress(percent);
+      }
+      return text;
+    };
+    proc.stdout.on('data', (chunk) => {
+      stdout += handleChunk(chunk);
+    });
+    proc.stderr.on('data', (chunk) => {
+      stderr += handleChunk(chunk);
+    });
+    proc.on('error', reject);
+    proc.on('exit', (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr || stdout || `Node command exited with code ${code}`));
+    });
+  });
+}
+
+async function findPortableBrowserExecutable(rootDir) {
+  const executableNames = process.platform === 'win32'
+    ? ['chrome-headless-shell.exe', 'chrome.exe']
+    : ['chrome-headless-shell', 'Chromium', 'Google Chrome for Testing', 'chrome'];
+  const queue = [rootDir];
+  while (queue.length) {
+    const current = queue.shift();
+    const entries = await fs.readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(fullPath);
+        continue;
+      }
+      if (executableNames.includes(entry.name)) {
+        return fullPath;
+      }
+    }
+  }
+  return null;
+}
+
+function resolvePlaywrightCliPath() {
+  const packageJsonPath = require.resolve('playwright-core/package.json');
+  const packageRoot = path.dirname(packageJsonPath);
+  return path.join(packageRoot, 'cli.js');
+}
+
 function findSupportedBrowserExecutable() {
+  if (process.env.CODEXMETER_EXPORT_DEBUG_FORCE_UNSUPPORTED === '1') {
+    return null;
+  }
   if (process.env.CODEXMETER_EXPORT_BROWSER && fsSync.existsSync(process.env.CODEXMETER_EXPORT_BROWSER)) {
     return process.env.CODEXMETER_EXPORT_BROWSER;
   }

@@ -243,10 +243,16 @@ body {
 .range-btn:disabled {
   cursor: not-allowed;
 }
+.export-video-btn {
+  min-width: 110px;
+}
+.export-video-btn:disabled {
+  cursor: not-allowed;
+}
 .range-btn-unsupported {
-  color: rgba(139, 148, 158, 0.7);
-  background: rgba(255, 255, 255, 0.03);
-  border-left: 1px solid rgba(240, 185, 11, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  background: var(--accent);
+  border-left: 1px solid rgba(240, 185, 11, 0.22);
   position: relative;
 }
 .range-btn-unsupported::before {

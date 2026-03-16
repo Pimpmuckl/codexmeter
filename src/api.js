@@ -37,7 +37,7 @@ export const api = {
   families: () => fetchJson('/api/families'),
   live: () => new EventSource(apiUrl('/api/live')),
   rerun: () => postJson('/api/rerun'),
-  startOverviewVideoExport: () => postJson('/api/export/overview-video', null, {
+  startOverviewVideoExport: (opts = {}) => postJson('/api/export/overview-video', opts, {
     headers: {
       'x-codexmeter-client-base': window.location.origin,
     },
