@@ -27,7 +27,7 @@ test('dashboard tabs render and basic interactions survive in a real browser', a
       args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
     });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
-    await page.goto(url, { waitUntil: 'networkidle' });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
 
     await page.getByText('Top Repos', { exact: true }).waitFor();
     await page.getByText('Work Type', { exact: true }).waitFor();
