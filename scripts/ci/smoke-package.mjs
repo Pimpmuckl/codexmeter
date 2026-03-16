@@ -12,11 +12,7 @@ let tarballPath = null;
 try {
   await run(process.execPath, ['scripts/ci/create-smoke-codex-home.mjs', codexHome], { cwd: repoRoot });
   const packOutput = await runNpmCapture(['pack', '--json'], { cwd: repoRoot });
-  const jsonStart = packOutput.stdout.indexOf('[');
-  if (jsonStart < 0) {
-    throw new Error(`Could not find npm pack JSON output:\n${packOutput.stdout}\n${packOutput.stderr}`);
-  }
-  const packEntries = JSON.parse(packOutput.stdout.slice(jsonStart).trim());
+  const packEntries = extractPackEntries(packOutput.stdout, packOutput.stderr);
   const tarballName = packEntries?.[0]?.filename;
   if (!tarballName) {
     throw new Error(`Could not resolve tarball from npm pack output:\n${packOutput.stdout}\n${packOutput.stderr}`);
@@ -140,6 +136,16 @@ async function runNpmCapture(args, options) {
     return await runAndCapture('cmd.exe', ['/d', '/s', '/c', 'npm', ...args], options);
   }
   return await runAndCapture('npm', args, options);
+}
+
+function extractPackEntries(stdout, stderr) {
+  const trimmed = stdout.trimEnd();
+  const match = trimmed.match(/(\[\s*\{[\s\S]*\}\s*\])\s*$/);
+  if (!match?.[1]) {
+    throw new Error(`Could not find trailing npm pack JSON output:\n${stdout}\n${stderr}`);
+  }
+
+  return JSON.parse(match[1]);
 }
 
 async function terminate(proc) {
