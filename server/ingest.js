@@ -12,10 +12,20 @@ import { createRolloutWorkerPool } from './rollout-worker-pool.js';
 import { beginReplayCapture, createReplayCaptureState, failReplayCapture, getReplaySnapshot, recordReplayEvent, resetReplayCapture } from './export-replay.js';
 import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 
-const LIVE_FRAME_INTERVAL_MS = 50;
+const LIVE_FRAME_INTERVAL_MS = Math.max(
+  16,
+  Math.round(Number(OVERVIEW_INGEST_ANIMATION.live?.frameIntervalMs) || 50)
+);
 const LIVE_DAYS_PER_SECOND = 6;
-const LIVE_OVERVIEW_CADENCE_MS = Math.round(1000 / 10);
-const LIVE_DAY_KEYS_PER_EMIT = 1;
+const LIVE_OVERVIEW_HZ = Math.max(
+  1,
+  Number(OVERVIEW_INGEST_ANIMATION.live?.overviewHz) || 10
+);
+const LIVE_OVERVIEW_CADENCE_MS = Math.round(1000 / LIVE_OVERVIEW_HZ);
+const LIVE_DAY_KEYS_PER_EMIT = Math.max(
+  1,
+  Math.round(Number(OVERVIEW_INGEST_ANIMATION.live?.dayKeysPerEmit) || 1)
+);
 const LIVE_SESSION_REORDER_BUFFER = 160;
 
 export function createIngestState() {

@@ -19,8 +19,13 @@ const AUTO = 'auto';
  */
 export const OVERVIEW_INGEST_ANIMATION = {
   speed: 1,
+  live: {
+    frameIntervalMs: 33,
+    overviewHz: 20,
+    dayKeysPerEmit: 1,
+  },
   main: {
-    presentationDurationMs: 300,
+    presentationDurationMs: 220,
     chartAppearDurationMs: 0,
     chartUpdateDurationMs: 200,
     easing: 'linear',
@@ -34,15 +39,15 @@ export const OVERVIEW_INGEST_ANIMATION = {
     // Fixed presentation duration in ms during the tail; use AUTO to derive it from main.durationScale.
     durationMs: AUTO,
     // Multiplier applied to the normal presentation duration when durationMs is AUTO.
-    durationScale: 20,
+    durationScale: 10,
     // Shared easing applied by the Overview presentation animator during the tail.
     easing: 'cubicOut',
     // Backend Overview live-update cadence during the tail, in patches per second.
-    overviewHz: 5,
+    overviewHz: 10,
   },
   daily: {
     chartAppearDurationMs: AUTO,
-    chartUpdateDurationMs: 30,
+    chartUpdateDurationMs: 60,
     easing: AUTO,
     easingUpdate: AUTO,
   },
