@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
@@ -30,9 +30,9 @@ function exportChart(ref) {
   Object.assign(document.createElement('a'), { href: url, download: 'codexmeter-repos.png' }).click();
 }
 
-function getReposData(data) {
+function getReposData(data, range = 'total') {
   const d = data?.data;
-  return Array.isArray(d) ? d : d?.total || [];
+  return Array.isArray(d) ? d : d?.[range] || d?.total || [];
 }
 
 function RepoDetailCharts({ repo, chartMode }) {
@@ -104,12 +104,12 @@ function RepoDetailCharts({ repo, chartMode }) {
   );
 }
 
-export default function Repos({ data, chartMode = 'default' }) {
+export default function Repos({ data, range = 'total', chartMode = 'default' }) {
   const [family, setFamily] = useState('all');
   const [expanded, setExpanded] = useState(null);
   const chartRef = useRef(null);
 
-  const reposData = getReposData(data);
+  const reposData = useMemo(() => getReposData(data, range), [data, range]);
   const filtered = useMemo(() => {
     if (!reposData?.length) return [];
     if (family === 'all') return reposData;
@@ -121,6 +121,13 @@ export default function Repos({ data, chartMode = 'default' }) {
       .filter(Boolean)
       .sort((a, b) => b.tokens - a.tokens);
   }, [reposData, family]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    if (!filtered.some((repo) => repo.repo_key === expanded)) {
+      setExpanded(null);
+    }
+  }, [expanded, filtered]);
 
   if (!reposData?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
 

@@ -607,8 +607,8 @@ export default function App() {
               isIngestActive={overviewIngestActive}
             />
           )}
-          {tab === 'Repos' && <Repos data={data.repos} />}
-          {tab === 'Models' && <Models data={data.models} />}
+          {tab === 'Repos' && <Repos data={data.repos} range={range} />}
+          {tab === 'Models' && <Models data={data.models} range={range} />}
           {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}
           {tab === 'Sessions' && <Sessions data={data.sessions} />}
         </div>

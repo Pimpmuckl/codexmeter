@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
@@ -144,16 +144,22 @@ function exportChart(ref) {
   Object.assign(document.createElement('a'), { href: url, download: 'codexmeter-models.png' }).click();
 }
 
-function getModelsData(data) {
+function getModelsData(data, range = 'total') {
   const d = data?.data;
-  return Array.isArray(d) ? d : d?.total || [];
+  return Array.isArray(d) ? d : d?.[range] || d?.total || [];
 }
 
-export default function Models({ data, chartMode = 'default' }) {
+export default function Models({ data, range = 'total', chartMode = 'default' }) {
   const [expanded, setExpanded] = useState(null);
   const chartRef = useRef(null);
 
-  const models = getModelsData(data);
+  const models = useMemo(() => getModelsData(data, range), [data, range]);
+  useEffect(() => {
+    if (!expanded) return;
+    if (!models.some((model) => model.model_name === expanded)) {
+      setExpanded(null);
+    }
+  }, [expanded, models]);
   if (!models?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
   const reversed = [...models].reverse();
   const maxTokens = Math.max(...models.map((model) => model.tokens || 0), 0);
