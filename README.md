@@ -13,7 +13,7 @@ That’s it. A local URL is printed; Ctrl+click to open. The dashboard ingests y
 ## Usage
 
 ```bash
-# Default: auto port, open browser, read ~/.codex
+# Default: auto port, open browser, read $CODEX_HOME or ~/.codex
 npx codexmeter@latest
 
 # Custom Codex home

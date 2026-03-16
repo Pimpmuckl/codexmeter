@@ -5,10 +5,12 @@ import path from 'path';
 import os from 'os';
 import { createServer } from '../server/index.js';
 
+const defaultCodexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+
 program
   .name('codexmeter')
   .description('Local telemetry dashboard for Codex CLI usage')
-  .option('--codex-home <path>', 'Path to .codex directory', path.join(os.homedir(), '.codex'))
+  .option('--codex-home <path>', 'Path to .codex directory', defaultCodexHome)
   .option('--port <n>', 'Port number', '0')
   .option('--no-open', 'Do not open browser automatically')
   .option('--from <date>', 'Start date filter (YYYY-MM-DD)')
