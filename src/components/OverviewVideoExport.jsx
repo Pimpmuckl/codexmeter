@@ -226,11 +226,12 @@ function createExportSimulation(renderData) {
     : cloneProgress(bootstrapProgress);
 
   const startHoldDurationMs = Math.max(renderData.startHoldDurationMs || 0, 0);
+  const frontloadSettledDurationMs = Math.max(renderData.frontloadSettledDurationMs || 0, 0);
   const replayDurationMs = Math.max(renderData.replayDurationMs || renderData.replay?.duration_ms || 1, 1);
   const tailDurationMs = Math.max(renderData.tailDurationMs || 0, 0);
   const finalHoldDurationMs = Math.max(renderData.finalHoldDurationMs || 0, 0);
   const totalDurationMs = Math.max(
-    renderData.durationMs || (startHoldDurationMs + replayDurationMs + tailDurationMs + finalHoldDurationMs) || 1,
+    renderData.durationMs || (frontloadSettledDurationMs + startHoldDurationMs + replayDurationMs + tailDurationMs + finalHoldDurationMs) || 1,
     1
   );
   const sourceDurationMs = Math.max(renderData.replay?.duration_ms || 0, 0);
@@ -245,8 +246,13 @@ function createExportSimulation(renderData) {
   const finalPresentation = keyframes[keyframes.length - 1]?.presentation || initialPresentation;
   const tailStartPresentation = samplePresentationFromKeyframes(keyframes, tailSourceStartMs);
   const lateReplayDurationMs = Math.min(3600, Math.max(1800, Math.round(replayDurationMs * 0.32)));
-  const lateReplayStartMs = Math.max(startHoldDurationMs, (startHoldDurationMs + replayDurationMs) - lateReplayDurationMs);
-  const lateReplayStartProgress = clamp01((lateReplayStartMs - startHoldDurationMs) / Math.max(replayDurationMs, 1));
+  const lateReplayStartMs = Math.max(
+    frontloadSettledDurationMs + startHoldDurationMs,
+    (frontloadSettledDurationMs + startHoldDurationMs + replayDurationMs) - lateReplayDurationMs
+  );
+  const lateReplayStartProgress = clamp01(
+    (lateReplayStartMs - (frontloadSettledDurationMs + startHoldDurationMs)) / Math.max(replayDurationMs, 1)
+  );
   const lateReplaySourceStartMs = Math.round(sourceStartMs + (mainReplaySourceDurationMs * applyCubicIn(lateReplayStartProgress)));
   const lateReplayStartPresentation = samplePresentationFromKeyframes(keyframes, lateReplaySourceStartMs);
   const lateReplayFrames = buildSmoothedTransitionFrames({
@@ -271,6 +277,7 @@ function createExportSimulation(renderData) {
   return {
     renderData,
     totalDurationMs,
+    frontloadSettledDurationMs,
     startHoldDurationMs,
     replayDurationMs,
     tailDurationMs,
@@ -281,12 +288,12 @@ function createExportSimulation(renderData) {
     tailSourceDurationMs,
     tailSourceStartMs,
     mainReplaySourceDurationMs,
-    replayStartMs: startHoldDurationMs,
+    replayStartMs: frontloadSettledDurationMs + startHoldDurationMs,
     lateReplayStartMs,
     lateReplayDurationMs,
     lateReplaySourceStartMs,
-    tailStartMs: startHoldDurationMs + replayDurationMs,
-    finalHoldStartMs: startHoldDurationMs + replayDurationMs + tailDurationMs,
+    tailStartMs: frontloadSettledDurationMs + startHoldDurationMs + replayDurationMs,
+    finalHoldStartMs: frontloadSettledDurationMs + startHoldDurationMs + replayDurationMs + tailDurationMs,
     currentSeekMs: 0,
     started: false,
     finished: false,
@@ -325,7 +332,10 @@ function advanceExportSimulation(sim, requestedSeekMs) {
   let sourceMs = 0;
   let tailProgress = null;
 
-  if (targetSeekMs < sim.tailStartMs) {
+  if (targetSeekMs < sim.frontloadSettledDurationMs) {
+    phase = 'thumbnail_hold';
+    sim.presentation = sim.finalPresentation;
+  } else if (targetSeekMs < sim.tailStartMs) {
     if (targetSeekMs < sim.lateReplayStartMs) {
       sourceMs = mapReplaySeekMs(sim, targetSeekMs);
       sim.presentation = samplePresentationAtSource(sim, sourceMs);
@@ -343,7 +353,14 @@ function advanceExportSimulation(sim, requestedSeekMs) {
     sim.presentation = sim.finalPresentation;
   }
 
-  if (targetSeekMs >= sim.finalHoldStartMs) {
+  if (phase === 'thumbnail_hold') {
+    sim.progress = {
+      ...(sim.progress || {}),
+      percent: 1,
+      complete: true,
+      phase: 'thumbnail_hold',
+    };
+  } else if (targetSeekMs >= sim.finalHoldStartMs) {
     const holdProgress = clamp01((targetSeekMs - sim.finalHoldStartMs) / Math.max(sim.finalHoldDurationMs || 1, 1));
     sim.progress = {
       ...(sim.progress || {}),
@@ -401,6 +418,9 @@ function blendExportFrameState(previousFrame, nextFrame, dt, elapsedMs) {
   if (elapsedMs < displayTweenStartMs) return nextFrame;
 
   const overallDurationMs = (
+    (exportConfig.frontloadSettledFrameCount
+      ? Math.max(1, Math.round((exportConfig.frontloadSettledFrameCount * 1000) / Math.max(exportConfig.fps ?? 60, 1)))
+      : 0) +
     (exportConfig.startHoldDurationMs ?? 0) +
     (exportConfig.replayDurationMs ?? 0) +
     (exportConfig.tailDurationMs ?? 0) +

@@ -11,12 +11,16 @@ import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 const EXPORT_WIDTH = OVERVIEW_INGEST_ANIMATION.videoExport?.width ?? 1080;
 const EXPORT_HEIGHT = OVERVIEW_INGEST_ANIMATION.videoExport?.height ?? 864;
 const EXPORT_FPS = OVERVIEW_INGEST_ANIMATION.videoExport?.fps ?? 60;
+const EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT = Math.max(0, Math.round(OVERVIEW_INGEST_ANIMATION.videoExport?.frontloadSettledFrameCount ?? 1));
+const EXPORT_FRONTLOAD_SETTLED_DURATION_MS = EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT > 0
+  ? Math.max(1, Math.round((EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT * 1000) / Math.max(EXPORT_FPS, 1)))
+  : 0;
 const EXPORT_START_HOLD_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.startHoldDurationMs ?? 500;
 const EXPORT_REPLAY_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.replayDurationMs ?? 8000;
 const EXPORT_TAIL_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.tailDurationMs ?? 5000;
 const EXPORT_FINAL_HOLD_DURATION_MS = OVERVIEW_INGEST_ANIMATION.videoExport?.finalHoldDurationMs ?? 3500;
 const EXPORT_TOTAL_DURATION_MS =
-  EXPORT_START_HOLD_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS + EXPORT_FINAL_HOLD_DURATION_MS;
+  EXPORT_FRONTLOAD_SETTLED_DURATION_MS + EXPORT_START_HOLD_DURATION_MS + EXPORT_REPLAY_DURATION_MS + EXPORT_TAIL_DURATION_MS + EXPORT_FINAL_HOLD_DURATION_MS;
 const EXPORT_TAIL_SOURCE_FRACTION = OVERVIEW_INGEST_ANIMATION.videoExport?.tailSourceFraction ?? 0.035;
 const EXPORT_CRF = OVERVIEW_INGEST_ANIMATION.videoExport?.crf ?? 20;
 const EXPORT_ENCODER_PRESET = OVERVIEW_INGEST_ANIMATION.videoExport?.encoderPreset ?? 'fast';
@@ -54,6 +58,8 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         width: EXPORT_WIDTH,
         height: EXPORT_HEIGHT,
         fps: EXPORT_FPS,
+        frontload_settled_frame_count: EXPORT_FRONTLOAD_SETTLED_FRAME_COUNT,
+        frontload_settled_duration_ms: EXPORT_FRONTLOAD_SETTLED_DURATION_MS,
         start_hold_duration_ms: EXPORT_START_HOLD_DURATION_MS,
         replay_duration_ms: EXPORT_REPLAY_DURATION_MS,
         tail_duration_ms: EXPORT_TAIL_DURATION_MS,
@@ -93,6 +99,8 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
         width: job.width,
         height: job.height,
         fps: job.fps,
+        frontloadSettledFrameCount: job.frontload_settled_frame_count,
+        frontloadSettledDurationMs: job.frontload_settled_duration_ms,
         durationMs: job.duration_ms,
         startHoldDurationMs: job.start_hold_duration_ms,
         replayDurationMs: job.replay_duration_ms,

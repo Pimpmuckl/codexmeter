@@ -76,6 +76,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
     width: 1080,
     height: 864,
     fps: 60,
+    frontloadSettledFrameCount: 1,
 
     // Intro fade-in effect
     introFadeEnabled: true,
