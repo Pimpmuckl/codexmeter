@@ -6,6 +6,9 @@
   "bin": {
     "codexmeter": "./bin/codexmeter.js"
   },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "files": [
     "bin",
     "server",
@@ -18,6 +21,7 @@
     "dev": "node dev-runner.js",
     "build": "vite build",
     "prepack": "npm run build",
+    "pretest": "npm run build",
     "test": "node --test \"test/*.test.js\" \"test/**/*.test.js\"",
     "start": "node bin/codexmeter.js",
     "preview": "npm run build && node bin/codexmeter.js",
