@@ -20,7 +20,7 @@ const AUTO = 'auto';
 export const OVERVIEW_INGEST_ANIMATION = {
   speed: 1,
   main: {
-    presentationDurationMs: 190,
+    presentationDurationMs: 300,
     chartAppearDurationMs: 0,
     chartUpdateDurationMs: 200,
     easing: 'linear',
@@ -34,7 +34,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
     // Fixed presentation duration in ms during the tail; use AUTO to derive it from main.durationScale.
     durationMs: AUTO,
     // Multiplier applied to the normal presentation duration when durationMs is AUTO.
-    durationScale: 100,
+    durationScale: 20,
     // Shared easing applied by the Overview presentation animator during the tail.
     easing: 'cubicOut',
     // Backend Overview live-update cadence during the tail, in patches per second.
@@ -72,16 +72,37 @@ export const OVERVIEW_INGEST_ANIMATION = {
     nearMaxRatio: 0.985,
   },
   videoExport: {
+    // Video export settings
     width: 1080,
     height: 864,
     fps: 60,
-    startHoldDurationMs: 500,
+
+    // Intro fade-in effect
+    introFadeEnabled: true,
+    introFadeStartOpacity: 0.95,
+    introContentStartOpacity: 0.05,
+    introFadeDurationMs: 400,
+    introFadeDelayMs: 0,
+    introFadeEasing: 'cubicOut',
+
+    // Start Delay for the animation
+    startHoldDurationMs: 100,
+
+    // Replay duration
     replayDurationMs: 10000,
+
+    // Tail Settings
     tailDurationMs: 5000,
     replayEasing: 'cubicIn',
     tailSourceFraction: 0.55,
     tailEasing: 'cubicOut',
-    finalHoldDurationMs: 3500,
+    finalHoldDurationMs: 5000,
+
+    // Final Flash Settings
+    finalFlashDurationMs: 1000,
+    finalFlashMaxOpacity: 0.35,
+
+    // Display Tween Settings
     displayTweenStartMs: 200,
     displayTweenBaseMs: 240,
     displayTweenLateMs: 420,
@@ -90,6 +111,8 @@ export const OVERVIEW_INGEST_ANIMATION = {
     barsChartTailUpdateDurationMs: 240,
     donutsChartUpdateDurationMs: 50,
     donutsChartTailUpdateDurationMs: 240,
+
+    // Render settings
     captureFormat: 'png',
     jpegQuality: 92,
     crf: 10,

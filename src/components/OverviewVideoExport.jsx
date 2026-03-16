@@ -16,6 +16,7 @@ export default function OverviewVideoExport({ jobId }) {
   const rafRef = useRef(0);
   const displayFrameRef = useRef(null);
   const lastDisplayNowRef = useRef(0);
+  const flashStartSeekMsRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
@@ -32,6 +33,7 @@ export default function OverviewVideoExport({ jobId }) {
         lastDisplayNowRef.current = 0;
         setFrameState(initialFrame);
         setCaptureReady(false);
+        flashStartSeekMsRef.current = null;
       } catch (nextError) {
         if (!alive) return;
         setError(nextError.message || String(nextError));
@@ -50,10 +52,33 @@ export default function OverviewVideoExport({ jobId }) {
     let raf1 = 0;
     let raf2 = 0;
     let raf3 = 0;
+    let raf4 = 0;
+    let readyTimer = 0;
+
+    const waitForFullFrame = () => {
+      const statValues = Array.from(document.querySelectorAll('.stat-card .stat-value'));
+      const chartCanvases = Array.from(document.querySelectorAll('canvas'));
+      const hasStats = statValues.length >= 4 && statValues.every((node) => String(node.textContent || '').trim().length > 0);
+      const hasCharts = chartCanvases.length >= 4 && chartCanvases.every((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      const hasHeatmap = document.querySelectorAll('.heatmap-cell').length >= 300;
+
+      if (!(hasStats && hasCharts && hasHeatmap)) {
+        raf4 = requestAnimationFrame(waitForFullFrame);
+        return;
+      }
+
+      readyTimer = window.setTimeout(() => {
+        if (!cancelled) setCaptureReady(true);
+      }, 180);
+    };
+
     raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
         raf3 = requestAnimationFrame(() => {
-          if (!cancelled) setCaptureReady(true);
+          raf4 = requestAnimationFrame(waitForFullFrame);
         });
       });
     });
@@ -62,8 +87,21 @@ export default function OverviewVideoExport({ jobId }) {
       if (raf1) cancelAnimationFrame(raf1);
       if (raf2) cancelAnimationFrame(raf2);
       if (raf3) cancelAnimationFrame(raf3);
+      if (raf4) cancelAnimationFrame(raf4);
+      if (readyTimer) window.clearTimeout(readyTimer);
     };
   }, [error, frameState]);
+
+  useEffect(() => {
+    if (!frameState) return;
+    if (frameState.phase === 'final_hold') {
+      if (flashStartSeekMsRef.current == null) {
+        flashStartSeekMsRef.current = frameState.seekMs || 0;
+      }
+      return;
+    }
+    flashStartSeekMsRef.current = null;
+  }, [frameState?.phase, frameState?.seekMs]);
 
   useEffect(() => {
     const startPlayback = () => {
@@ -138,18 +176,37 @@ export default function OverviewVideoExport({ jobId }) {
   return (
     <div style={containerStyle}>
       <div style={frameStyle}>
-        <OverviewFrame
-          presentation={frameState.presentation}
-          rawPresentation={frameState.rawPresentation}
-          ingestProgress={Math.min(Math.max(frameState.progress?.percent || 0, 0), 1)}
-          isIngestActive={Boolean(frameState.progress && !frameState.progress.complete)}
-          exportMode={false}
-          exportPlayback={true}
-          exportPhase={frameState.phase}
-        />
-        <div style={footerStyle}>
-          Made with <span style={footerHeartStyle}>♥</span> by JJ
+        <div
+          style={{
+            ...contentFadeLayerStyle,
+            opacity: computeIntroContentOpacity(frameState.seekMs),
+          }}
+        >
+          <OverviewFrame
+            presentation={frameState.presentation}
+            rawPresentation={frameState.rawPresentation}
+            ingestProgress={Math.min(Math.max(frameState.progress?.percent || 0, 0), 1)}
+            isIngestActive={Boolean(frameState.progress && !frameState.progress.complete)}
+            exportMode={false}
+            exportPlayback={true}
+            exportPhase={frameState.phase}
+          />
+          <div style={footerStyle}>
+            Made with <span style={footerHeartStyle}>♥</span> by JJ
+          </div>
         </div>
+        <div
+          style={{
+            ...introFadeOverlayStyle,
+            opacity: computeIntroFadeOpacity(frameState.seekMs),
+          }}
+        />
+        <div
+          style={{
+            ...flashOverlayStyle,
+            ...computeFinalFlashStyle(frameState.seekMs, flashStartSeekMsRef.current),
+          }}
+        />
       </div>
     </div>
   );
@@ -257,6 +314,7 @@ function snapshotExportSimulation(sim) {
     rawPresentation: sim.presentation,
     progress: sim.progress,
     phase: sim.debugState?.phase || 'replay',
+    seekMs: sim.currentSeekMs || 0,
   };
 }
 
@@ -326,7 +384,7 @@ function mapReplaySeekMs(sim, timelineMs) {
   const replayElapsedMs = timelineMs - sim.replayStartMs;
   if (replayElapsedMs <= sim.replayDurationMs) {
     const progress = clamp01(replayElapsedMs / Math.max(sim.replayDurationMs, 1));
-    return Math.round(sim.sourceStartMs + (sim.mainReplaySourceDurationMs * applyCubicIn(progress)));
+    return sim.sourceStartMs + (sim.mainReplaySourceDurationMs * applyCubicIn(progress));
   }
 
   return sim.sourceDurationMs;
@@ -372,7 +430,59 @@ function blendExportFrameState(previousFrame, nextFrame, dt, elapsedMs) {
       complete: nextProgress.complete,
     },
     phase: nextFrame.phase,
+    seekMs: nextFrame.seekMs || 0,
   };
+}
+
+function computeFinalFlashStyle(seekMs, flashStartSeekMs) {
+  const exportConfig = OVERVIEW_INGEST_ANIMATION.videoExport || {};
+  const flashDurationMs = Math.max(exportConfig.finalFlashDurationMs ?? 280, 0);
+  const flashMaxOpacity = Math.max(exportConfig.finalFlashMaxOpacity ?? 0.22, 0);
+  if (!flashDurationMs || !flashMaxOpacity) {
+    return { opacity: 0, boxShadow: 'none' };
+  }
+  if (flashStartSeekMs == null) {
+    return { opacity: 0, boxShadow: 'none' };
+  }
+  const flashElapsedMs = seekMs - flashStartSeekMs;
+  if (flashElapsedMs < 0 || flashElapsedMs > flashDurationMs) {
+    return { opacity: 0, boxShadow: 'none' };
+  }
+
+  const t = clamp01(flashElapsedMs / flashDurationMs);
+  const opacity = flashMaxOpacity * (1 - applyCubicOut(t));
+  const bloomOpacity = Math.min(1, opacity * 0.7);
+  return {
+    opacity,
+    boxShadow: `0 0 120px 50px rgba(255, 255, 255, ${bloomOpacity}) inset`,
+  };
+}
+
+function computeIntroFadeOpacity(seekMs) {
+  const exportConfig = OVERVIEW_INGEST_ANIMATION.videoExport || {};
+  if (!exportConfig.introFadeEnabled) return 0;
+  const startOpacity = Math.max(0, Math.min(1, exportConfig.introFadeStartOpacity ?? 0.2));
+  const delayMs = Math.max(0, exportConfig.introFadeDelayMs ?? 0);
+  const durationMs = Math.max(0, exportConfig.introFadeDurationMs ?? 900);
+  if (!startOpacity) return 0;
+  if (seekMs <= delayMs) return startOpacity;
+  if (!durationMs) return 0;
+  const t = clamp01((seekMs - delayMs) / durationMs);
+  const eased = applyNamedEasing(exportConfig.introFadeEasing || 'cubicOut', t);
+  return startOpacity * (1 - eased);
+}
+
+function computeIntroContentOpacity(seekMs) {
+  const exportConfig = OVERVIEW_INGEST_ANIMATION.videoExport || {};
+  if (!exportConfig.introFadeEnabled) return 1;
+  const startOpacity = Math.max(0, Math.min(1, exportConfig.introContentStartOpacity ?? 0.35));
+  const delayMs = Math.max(0, exportConfig.introFadeDelayMs ?? 0);
+  const durationMs = Math.max(0, exportConfig.introFadeDurationMs ?? 900);
+  if (seekMs <= delayMs) return startOpacity;
+  if (!durationMs) return 1;
+  const t = clamp01((seekMs - delayMs) / durationMs);
+  const eased = applyNamedEasing(exportConfig.introFadeEasing || 'cubicOut', t);
+  return lerpNumber(startOpacity, 1, eased);
 }
 
 function buildPresentationKeyframes(renderData, bootstrapLiveState, events) {
@@ -643,14 +753,36 @@ const footerStyle = {
   position: 'absolute',
   right: 18,
   bottom: 10,
-  color: '#8b949e',
-  fontSize: 11,
+  color: 'rgba(139, 148, 158, 0.58)',
+  fontSize: 10,
   fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
   letterSpacing: '0.02em',
-  opacity: 0.85,
+  opacity: 0.62,
   pointerEvents: 'none',
 };
 
 const footerHeartStyle = {
-  color: '#f43f5e',
+  color: 'rgba(244, 63, 94, 0.52)',
+};
+
+const flashOverlayStyle = {
+  position: 'absolute',
+  inset: 0,
+  background: 'linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(248,250,255,1) 100%)',
+  pointerEvents: 'none',
+  zIndex: 20,
+  mixBlendMode: 'screen',
+};
+
+const introFadeOverlayStyle = {
+  position: 'absolute',
+  inset: 0,
+  background: '#000000',
+  pointerEvents: 'none',
+  zIndex: 30,
+};
+
+const contentFadeLayerStyle = {
+  position: 'relative',
+  zIndex: 1,
 };

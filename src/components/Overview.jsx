@@ -64,6 +64,46 @@ function getOverviewDailyBarSizing(count) {
   return { barWidth: null, barMaxWidth: 12 };
 }
 
+function buildOverviewDonutRows(rows, getColor) {
+  const positiveRows = rows.filter((row) => (row.tokens || 0) > 0);
+  const singleRow = positiveRows.length === 1 ? positiveRows[0] : null;
+  return rows.map((row) => {
+    const color = getColor(row.key);
+    if (singleRow && row.key === singleRow.key) {
+      return {
+        name: row.label,
+        value: row.tokens,
+        itemStyle: { color },
+        label: {
+          show: true,
+          position: 'center',
+          formatter: '{b}',
+          color,
+          fontSize: 12,
+          fontWeight: 600,
+        },
+        labelLine: { show: false },
+      };
+    }
+    if (singleRow) {
+      return {
+        name: row.label,
+        value: row.tokens,
+        itemStyle: { color },
+        label: { show: false },
+        labelLine: { show: false },
+      };
+    }
+    return {
+      name: row.label,
+      value: row.tokens,
+      itemStyle: { color },
+      label: { show: true, color },
+      labelLine: { show: true },
+    };
+  });
+}
+
 function DailySpark({ daily, exportMode = false }) {
   if (!daily?.dates?.length) {
     return (
@@ -324,7 +364,7 @@ export function OverviewFrame({
       data: reversedRepos.map((row) => {
         const val = row.tokens || 0;
         const pct = val / maxRepoTokens;
-        const inside = pct >= 0.25;
+        const inside = pct >= 0.7;
         const barColor = getRepoColor(row.label);
         return {
           value: val,
@@ -367,17 +407,10 @@ export function OverviewFrame({
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: orderedFamilies.map((row) => {
-        const pct = familyTotal > 0 ? (row.tokens || 0) / familyTotal : 0;
-        const showLabel = pct >= 0.01;
-        return {
-          name: row.label,
-          value: row.tokens,
-          itemStyle: { color: getFamilyColor(row.key) },
-          label: { show: showLabel, color: getFamilyColor(row.key) },
-          labelLine: { show: showLabel },
-        };
-      }),
+      data: buildOverviewDonutRows(
+        orderedFamilies.filter((row) => (familyTotal > 0 ? ((row.tokens || 0) / familyTotal) >= 0.01 : false)),
+        getFamilyColor
+      ),
     }],
   };
 
@@ -404,17 +437,10 @@ export function OverviewFrame({
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: orderedModels.map((row) => {
-        const pct = modelTotal > 0 ? (row.tokens || 0) / modelTotal : 0;
-        const showLabel = pct >= 0.01;
-        return {
-          name: row.label,
-          value: row.tokens,
-          itemStyle: { color: getModelColor(row.key) },
-          label: { show: showLabel, color: getModelColor(row.key) },
-          labelLine: { show: showLabel },
-        };
-      }),
+      data: buildOverviewDonutRows(
+        orderedModels.filter((row) => (modelTotal > 0 ? ((row.tokens || 0) / modelTotal) >= 0.01 : false)),
+        getModelColor
+      ),
     }],
   };
 
