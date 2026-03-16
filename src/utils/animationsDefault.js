@@ -35,7 +35,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
     // Master switch for the end-of-ingest slowdown behavior.
     enabled: true,
     // Progress threshold where the tail mode starts, expressed from 0..1.
-    startPercent: 0.85,
+    startPercent: 0.5,
     // Fixed presentation duration in ms during the tail; use AUTO to derive it from main.durationScale.
     durationMs: AUTO,
     // Multiplier applied to the normal presentation duration when durationMs is AUTO.
