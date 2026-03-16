@@ -73,7 +73,7 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
     d30: groupedSessions.filter(session => overlapsLowerBound(session, d30)),
   };
 
-  const calc = (arr, groupedArr) => {
+  const calc = (arr, groupedArr, lowerBound = 0) => {
     let tokens = 0, cost = 0, elapsed = 0, priced = 0, exactPriced = 0, heuristicPriced = 0, unpriced = 0, timeValid = 0, enriched = 0;
     const repoSet = new Set(), modelSet = new Set();
     let earliest = Infinity, latest = -Infinity;
@@ -101,6 +101,10 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
       }
     }
 
+    const boundedFrom = earliest === Infinity
+      ? null
+      : Math.max(earliest, lowerBound || 0);
+
     return {
       total_tokens: tokens,
       total_cost: cost,
@@ -108,7 +112,7 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
       active_repos: repoSet.size,
       active_models: modelSet.size,
       total_elapsed_seconds: elapsed,
-      date_range: { from: earliest === Infinity ? null : earliest, to: latest === -Infinity ? null : latest },
+      date_range: { from: boundedFrom, to: latest === -Infinity ? null : latest },
       coverage: {
         total: arr.length,
         thread_rows: arr.length,
@@ -124,9 +128,9 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
   };
 
   return {
-    total: calc(rawBuckets.total, groupedBuckets.total),
-    d7: calc(rawBuckets.d7, groupedBuckets.d7),
-    d30: calc(rawBuckets.d30, groupedBuckets.d30),
+    total: calc(rawBuckets.total, groupedBuckets.total, 0),
+    d7: calc(rawBuckets.d7, groupedBuckets.d7, d7),
+    d30: calc(rawBuckets.d30, groupedBuckets.d30, d30),
     cost_assumptions: CACHE_ASSUMPTIONS,
   };
 }

@@ -10,8 +10,17 @@ async function fetchJson(endpoint) {
   return res.json();
 }
 
-async function postJson(endpoint) {
-  const res = await fetch(apiUrl(endpoint), { method: 'POST' });
+async function postJson(endpoint, body = null, extraOptions = {}) {
+  const baseHeaders = body ? { 'Content-Type': 'application/json' } : undefined;
+  const res = await fetch(apiUrl(endpoint), {
+    method: 'POST',
+    ...extraOptions,
+    headers: {
+      ...(baseHeaders || {}),
+      ...(extraOptions.headers || {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -28,4 +37,9 @@ export const api = {
   families: () => fetchJson('/api/families'),
   live: () => new EventSource(apiUrl('/api/live')),
   rerun: () => postJson('/api/rerun'),
+  startOverviewVideoExport: (opts = {}) => postJson('/api/export/overview-video', opts),
+  exportSupport: () => fetchJson('/api/export/support'),
+  exportStatus: (jobId) => fetchJson(`/api/export/${encodeURIComponent(jobId)}/status`),
+  activeExport: () => fetchJson('/api/export/active'),
+  exportRenderData: (jobId) => fetchJson(`/api/export/${encodeURIComponent(jobId)}/render-data`),
 };

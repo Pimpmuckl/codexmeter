@@ -140,9 +140,9 @@ body {
 }
 
 /* ─── Main ─── */
-.main-content { flex: 1; padding: 1.5rem 2rem 3rem; max-width: 1400px; margin: 0 auto; width: 100%; min-width: 0; container-type: inline-size; container-name: main; }
+.main-content { flex: 1; padding: 1.5rem 2rem 1.25rem; max-width: 1400px; margin: 0 auto; width: 100%; min-width: 0; container-type: inline-size; container-name: main; }
 .app-footer {
-  padding: 0.75rem 2rem 1rem;
+  padding: 0.5rem 2rem 0.75rem;
   font-size: 0.7rem;
   color: var(--text-muted);
   text-align: center;
@@ -240,6 +240,37 @@ body {
 }
 .range-btn:hover { color: var(--text-secondary); }
 .range-btn.active { color: #fff; background: var(--accent); }
+.range-btn:disabled {
+  cursor: not-allowed;
+}
+.export-video-btn {
+  min-width: 110px;
+}
+.export-video-btn:disabled {
+  cursor: not-allowed;
+}
+.range-btn-unsupported {
+  color: rgba(255, 255, 255, 0.92);
+  background: var(--accent);
+  border-left: 1px solid rgba(240, 185, 11, 0.22);
+  position: relative;
+}
+.range-btn-unsupported::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(240, 185, 11, 0.05) 0,
+    rgba(240, 185, 11, 0.05) 6px,
+    rgba(255, 255, 255, 0.01) 6px,
+    rgba(255, 255, 255, 0.01) 12px
+  );
+  pointer-events: none;
+}
+.range-btn-unsupported:disabled {
+  opacity: 0.78;
+}
 
 /* ─── Heatmap ─── */
 .heatmap-wrap {
@@ -343,6 +374,13 @@ body {
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem; min-width: 0; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; min-width: 0; }
 .grid-3 > .chart-card { min-width: 0; overflow: hidden; }
+.grid-3 > .overview-donut-card {
+  overflow: visible;
+}
+.overview-donut-card .echarts-for-react,
+.overview-donut-card .echarts-for-react > div {
+  overflow: visible !important;
+}
 @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } .grid-3 { grid-template-columns: 1fr; } }
 
 /* ─── Buttons ─── */
@@ -717,8 +755,9 @@ tr:hover td { color: var(--text-primary); background: rgba(99, 102, 241, 0.03); 
   gap: 1.5rem;
   font-size: 0.68rem;
   color: var(--text-muted);
-  padding: 0.5rem 0;
-  margin-bottom: 1rem;
+  padding: 0.25rem 0;
+  margin-top: -0.5rem;
+  margin-bottom: 0.5rem;
 }
 .coverage-item {
   display: flex;

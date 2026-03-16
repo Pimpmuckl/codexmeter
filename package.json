@@ -1,6 +1,6 @@
 {
   "name": "codexmeter",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Local telemetry dashboard for Codex CLI usage",
   "type": "module",
   "bin": {
@@ -17,6 +17,7 @@
   "scripts": {
     "dev": "node dev-runner.js",
     "build": "vite build",
+    "test": "node --test test/*.test.js",
     "start": "node bin/codexmeter.js",
     "preview": "npm run build && node bin/codexmeter.js",
     "prepublishOnly": "npm run build"
@@ -26,7 +27,9 @@
     "commander": "^13.1.0",
     "express": "^5.1.0",
     "fast-glob": "^3.3.3",
-    "open": "^10.1.0"
+    "ffmpeg-static": "^5.2.0",
+    "open": "^10.1.0",
+    "playwright-core": "^1.58.2"
   },
   "devDependencies": {
     "@tanstack/react-table": "^8.21.3",

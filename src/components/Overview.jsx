@@ -64,7 +64,38 @@ function getOverviewDailyBarSizing(count) {
   return { barWidth: null, barMaxWidth: 12 };
 }
 
-function DailySpark({ daily }) {
+function buildOverviewDonutRows(rows, getColor) {
+  return rows.map((row) => {
+    const color = getColor(row.key);
+    return {
+      name: row.label,
+      value: row.tokens,
+      itemStyle: { color },
+      label: { show: true, color },
+      labelLine: { show: true },
+    };
+  });
+}
+
+function buildSingleDonutLabelLayout(activeRows) {
+  if (activeRows.length !== 1) return null;
+  return (params) => {
+    const sectorRect = params.rect || { x: 0, y: 0, width: 0, height: 0 };
+    const labelRect = params.labelRect || { width: 0, height: 0 };
+    const x = sectorRect.x + sectorRect.width + 14;
+    const y = sectorRect.y + (sectorRect.height / 2) - (labelRect.height / 2);
+    return {
+      x,
+      y,
+      align: 'left',
+      verticalAlign: 'middle',
+      moveOverlap: 'shiftY',
+      hideOverlap: false,
+    };
+  };
+}
+
+function DailySpark({ daily, exportMode = false }) {
   if (!daily?.dates?.length) {
     return (
       <div className="overview-daily-spark overview-daily-spark-empty">
@@ -115,7 +146,14 @@ function DailySpark({ daily }) {
     <div className="overview-daily-spark">
       <span className="overview-daily-spark-title">Daily Usage</span>
       <div className="overview-daily-spark-chart">
-        <ReactEChartsCore echarts={echarts} option={option} style={{ width: '100%', height: '100%' }} theme="dark" lazyUpdate={false} notMerge={false} />
+        <ReactEChartsCore
+          echarts={echarts}
+          option={option}
+          style={{ width: '100%', height: '100%' }}
+          theme="dark"
+          lazyUpdate={false}
+          notMerge={exportMode}
+        />
       </div>
     </div>
   );
@@ -252,39 +290,46 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
   );
 }
 
-function Overview({
-  data,
-  heatmap,
-  daily,
-  families,
-  repos,
-  models,
-  range = 'total',
-  onPresentationSettledChange = null,
+export function OverviewFrame({
+  presentation,
+  rawPresentation = null,
   ingestProgress = 0,
   isIngestActive = false,
+  exportMode = false,
+  exportPlayback = false,
+  exportPhase = null,
 }) {
-  const presentation = useAnimatedOverviewPresentation(
-    { overview: data, heatmap, daily, families, repos, models, range },
-    {
-      duration: OVERVIEW_PRESENTATION_DURATION_MS,
-      onSettledChange: onPresentationSettledChange,
-      ingestProgress,
-      isIngestActive,
-    }
-  );
-
-  if (!presentation.ready) return null;
-
+  if (!presentation?.ready) return null;
+  const chartPresentation = exportPlayback && exportPhase === 'replay' && rawPresentation?.ready
+    ? rawPresentation
+    : presentation;
   const { stats, topRepos, topFamilies, topModels } = presentation;
-  const reversedRepos = [...topRepos.slice(0, 6)].reverse();
-  const maxRepoTokens = Math.max(...topRepos.slice(0, 6).map(row => row.tokens || 0), 1);
-  const orderedFamilies = [...topFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
-  const orderedModels = [...topModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const chartTopRepos = chartPresentation.topRepos || [];
+  const chartTopFamilies = chartPresentation.topFamilies || [];
+  const chartTopModels = chartPresentation.topModels || [];
+  const reversedRepos = [...chartTopRepos.slice(0, 6)].reverse();
+  const maxRepoTokens = Math.max(...chartTopRepos.slice(0, 6).map(row => row.tokens || 0), 1);
+  const orderedFamilies = [...chartTopFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const orderedModels = [...chartTopModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const exportBarsUpdateDuration = exportPhase === 'tail' || exportPhase === 'final_hold'
+    ? (OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartTailUpdateDurationMs
+      ?? OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs
+      ?? 240)
+    : (OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs ?? 30);
+  const exportDonutsUpdateDuration = exportPhase === 'tail' || exportPhase === 'final_hold'
+    ? (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartTailUpdateDurationMs
+      ?? OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs
+      ?? 240)
+    : (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs ?? 30);
 
   const repoOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_BARS,
+    ...(exportMode ? { animation: false } : {}),
+    ...(exportPlayback ? {
+      animationDurationUpdate: exportBarsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
+    } : {}),
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -310,7 +355,7 @@ function Overview({
       data: reversedRepos.map((row) => {
         const val = row.tokens || 0;
         const pct = val / maxRepoTokens;
-        const inside = pct >= 0.25;
+        const inside = pct >= 0.7;
         const barColor = getRepoColor(row.label);
         return {
           value: val,
@@ -331,9 +376,16 @@ function Overview({
   };
 
   const familyTotal = orderedFamilies.reduce((sum, row) => sum + (row.tokens || 0), 0);
+  const visibleFamilyRows = orderedFamilies.filter((row) => (familyTotal > 0 ? ((row.tokens || 0) / familyTotal) >= 0.01 : false));
+  const familySingleLabelLayout = buildSingleDonutLabelLayout(visibleFamilyRows);
   const familyOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
+    ...(exportMode ? { animation: false } : {}),
+    ...(exportPlayback ? {
+      animationDurationUpdate: exportDonutsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
+    } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -342,30 +394,38 @@ function Overview({
     },
     series: [{
       type: 'pie',
-      animation: ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      avoidLabelOverlap: !familySingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
-      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
-      labelLine: { lineStyle: { color: '#30363d' } },
+      label: {
+        show: true,
+        color: '#8b949e',
+        fontSize: 11,
+        formatter: '{b}',
+        alignTo: 'edge',
+        edgeDistance: 5,
+        bleedMargin: 5,
+        distanceToLabelLine: 5,
+      },
+      labelLine: { lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: orderedFamilies.map((row) => {
-        const pct = familyTotal > 0 ? (row.tokens || 0) / familyTotal : 0;
-        const showLabel = pct >= 0.01;
-        return {
-          name: row.label,
-          value: row.tokens,
-          itemStyle: { color: getFamilyColor(row.key) },
-          label: { show: showLabel, color: getFamilyColor(row.key) },
-          labelLine: { show: showLabel },
-        };
-      }),
+      ...(familySingleLabelLayout ? { labelLayout: familySingleLabelLayout } : {}),
+      data: buildOverviewDonutRows(visibleFamilyRows, getFamilyColor),
     }],
   };
 
   const modelTotal = orderedModels.reduce((sum, row) => sum + (row.tokens || 0), 0);
+  const visibleModelRows = orderedModels.filter((row) => (modelTotal > 0 ? ((row.tokens || 0) / modelTotal) >= 0.01 : false));
+  const modelSingleLabelLayout = buildSingleDonutLabelLayout(visibleModelRows);
   const modelOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
+    ...(exportMode ? { animation: false } : {}),
+    ...(exportPlayback ? {
+      animationDurationUpdate: exportDonutsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
+    } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -374,23 +434,24 @@ function Overview({
     },
     series: [{
       type: 'pie',
-      animation: ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      avoidLabelOverlap: !modelSingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
-      label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
-      labelLine: { lineStyle: { color: '#30363d' } },
+      label: {
+        show: true,
+        color: '#8b949e',
+        fontSize: 11,
+        formatter: '{b}',
+        alignTo: 'edge',
+        edgeDistance: 5,
+        bleedMargin: 5,
+        distanceToLabelLine: 5,
+      },
+      labelLine: { lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: orderedModels.map((row) => {
-        const pct = modelTotal > 0 ? (row.tokens || 0) / modelTotal : 0;
-        const showLabel = pct >= 0.01;
-        return {
-          name: row.label,
-          value: row.tokens,
-          itemStyle: { color: getModelColor(row.key) },
-          label: { show: showLabel, color: getModelColor(row.key) },
-          labelLine: { show: showLabel },
-        };
-      }),
+      ...(modelSingleLabelLayout ? { labelLayout: modelSingleLabelLayout } : {}),
+      data: buildOverviewDonutRows(visibleModelRows, getModelColor),
     }],
   };
 
@@ -419,21 +480,21 @@ function Overview({
             <div className="stat-per-day"><span className="stat-per-day-value">{(stats.sessions / stats.days).toFixed(1)}</span> per day</div>
           </div>
         </div>
-        <DailySpark daily={presentation.daily} />
+        <DailySpark daily={presentation.daily} exportMode={exportMode} />
       </div>
 
       <Heatmap heatmapData={presentation.heatmap} isIngestActive={isIngestActive} ingestProgress={ingestProgress} />
 
       <div className="grid-3">
-        <div className="chart-card">
+        <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Top Repos</div>
           {topRepos.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={false} />
+            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
         </div>
-        <div className="chart-card">
+        <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
             <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={true} />
@@ -473,6 +534,39 @@ function Overview({
   );
 }
 
+function Overview({
+  data,
+  heatmap,
+  daily,
+  families,
+  repos,
+  models,
+  range = 'total',
+  onPresentationSettledChange = null,
+  ingestProgress = 0,
+  isIngestActive = false,
+  clockNowMs = null,
+}) {
+  const presentation = useAnimatedOverviewPresentation(
+    { overview: data, heatmap, daily, families, repos, models, range },
+    {
+      duration: OVERVIEW_PRESENTATION_DURATION_MS,
+      onSettledChange: onPresentationSettledChange,
+      ingestProgress,
+      isIngestActive,
+      clockNowMs,
+    }
+  );
+
+  return (
+    <OverviewFrame
+      presentation={presentation}
+      ingestProgress={ingestProgress}
+      isIngestActive={isIngestActive}
+    />
+  );
+}
+
 function areOverviewPropsEqual(prev, next) {
   return prev.data === next.data
     && prev.heatmap === next.heatmap
@@ -483,7 +577,8 @@ function areOverviewPropsEqual(prev, next) {
     && prev.range === next.range
     && prev.onPresentationSettledChange === next.onPresentationSettledChange
     && prev.ingestProgress === next.ingestProgress
-    && prev.isIngestActive === next.isIngestActive;
+    && prev.isIngestActive === next.isIngestActive
+    && prev.clockNowMs === next.clockNowMs;
 }
 
 export default memo(Overview, areOverviewPropsEqual);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { buildOverviewPresentationTarget, interpolateOverviewPresentation } from '../utils/overviewPresentation';
 import {
   OVERVIEW_PRESENTATION_DURATION_MS,
@@ -14,6 +14,7 @@ export function useAnimatedOverviewPresentation(
     onSettledChange,
     ingestProgress = 0,
     isIngestActive = false,
+    clockNowMs = null,
   } = {}
 ) {
   const target = useMemo(
@@ -48,15 +49,20 @@ export function useAnimatedOverviewPresentation(
     animatedRef.current = animated;
   }, [animated]);
 
-  useEffect(() => {
-    targetRef.current = target;
-    if (duration <= 0) {
-      currentRef.current = target;
-      animatedRef.current = target;
-      setAnimated(target);
-      emitSettled(true);
-      return undefined;
-    }
+  const applyImmediateTarget = (nextTarget) => {
+    currentRef.current = nextTarget;
+    targetRef.current = nextTarget;
+    animatedRef.current = nextTarget;
+    setAnimated(nextTarget);
+    emitSettled(true);
+    lastFrameRef.current = 0;
+    tweenStartRef.current = 0;
+    tweenFromRef.current = nextTarget;
+    tweenTargetRef.current = nextTarget;
+  };
+
+  const prepareTargetTransition = (nextTarget) => {
+    targetRef.current = nextTarget;
     emitSettled(false);
     const nextTailActive = isOverviewTailActive(ingestProgress, isIngestActive);
     const nextMode = nextTailActive ? 'tail' : 'smooth';
@@ -66,79 +72,110 @@ export function useAnimatedOverviewPresentation(
     }
     if (nextMode === 'tail') {
       tweenFromRef.current = currentRef.current;
-      tweenTargetRef.current = target;
+      tweenTargetRef.current = nextTarget;
       tweenStartRef.current = 0;
     }
+  };
+
+  const stepAnimator = (now, latestTarget) => {
+    if (now < lastFrameRef.current) {
+      lastFrameRef.current = 0;
+      tweenStartRef.current = 0;
+      tweenFromRef.current = currentRef.current;
+      tweenTargetRef.current = latestTarget;
+    }
+    if (!lastFrameRef.current) lastFrameRef.current = now;
+    const dt = Math.max(1, now - lastFrameRef.current);
+    lastFrameRef.current = now;
+    const effectiveDuration = resolveOverviewPresentationDuration(ingestProgress, isIngestActive) || duration;
+
+    const current = currentRef.current;
+    const tailActive = isOverviewTailActive(ingestProgress, isIngestActive);
+    const nextModeInner = tailActive ? 'tail' : 'smooth';
+    if (tweenModeRef.current !== nextModeInner) {
+      tweenModeRef.current = nextModeInner;
+      tweenStartRef.current = 0;
+    }
+
+    let next;
+    let settled;
+
+    if (nextModeInner === 'tail') {
+      if (tweenTargetRef.current !== latestTarget) {
+        tweenFromRef.current = current;
+        tweenTargetRef.current = latestTarget;
+        tweenStartRef.current = now;
+      }
+      if (!tweenStartRef.current) tweenStartRef.current = now;
+      const elapsed = Math.max(0, now - tweenStartRef.current);
+      const rawT = Math.min(1, elapsed / Math.max(effectiveDuration, 1));
+      const easedT = applyPresentationEasing(
+        rawT,
+        resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
+      );
+      next = interpolateOverviewPresentation(tweenFromRef.current, tweenTargetRef.current, easedT);
+      settled = rawT >= 1 || presentationDistance(next, latestTarget) <= 0.002;
+    } else {
+      const alphaBase = 1 - Math.exp(-dt / Math.max(effectiveDuration, 1));
+      const alpha = applyPresentationEasing(
+        alphaBase,
+        resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
+      );
+      next = interpolateOverviewPresentation(current, latestTarget, alpha);
+      settled = alpha >= 0.999 || presentationDistance(next, latestTarget) <= 0.002;
+    }
+
+    currentRef.current = next;
+    if (settled) {
+      currentRef.current = latestTarget;
+      animatedRef.current = latestTarget;
+      setAnimated(latestTarget);
+      emitSettled(true);
+      tweenStartRef.current = 0;
+      tweenFromRef.current = latestTarget;
+      tweenTargetRef.current = latestTarget;
+      return latestTarget;
+    }
+
+    animatedRef.current = next;
+    setAnimated(next);
+    return next;
+  };
+
+  useLayoutEffect(() => {
+    if (clockNowMs == null) return undefined;
+    if (duration <= 0) {
+      applyImmediateTarget(target);
+      return undefined;
+    }
+    prepareTargetTransition(target);
+    stepAnimator(clockNowMs, target);
+    return undefined;
+  }, [target, duration, ingestProgress, isIngestActive, clockNowMs]);
+
+  useEffect(() => {
+    if (clockNowMs != null) return undefined;
+    targetRef.current = target;
+    if (duration <= 0) {
+      applyImmediateTarget(target);
+      return undefined;
+    }
+    prepareTargetTransition(target);
     if (frameRef.current) return undefined;
-
-    const threshold = 0.002;
     const step = (now) => {
-      if (!lastFrameRef.current) lastFrameRef.current = now;
-      const dt = Math.max(1, now - lastFrameRef.current);
-      lastFrameRef.current = now;
-      const effectiveDuration = resolveOverviewPresentationDuration(ingestProgress, isIngestActive) || duration;
-
-      const latestTarget = targetRef.current;
-      const current = currentRef.current;
-      const tailActive = isOverviewTailActive(ingestProgress, isIngestActive);
-      const nextModeInner = tailActive ? 'tail' : 'smooth';
-      if (tweenModeRef.current !== nextModeInner) {
-        tweenModeRef.current = nextModeInner;
-        tweenStartRef.current = 0;
-      }
-
-      let next;
-      let settled;
-
-      if (nextModeInner === 'tail') {
-        if (tweenTargetRef.current !== latestTarget) {
-          tweenFromRef.current = current;
-          tweenTargetRef.current = latestTarget;
-          tweenStartRef.current = now;
-        }
-        if (!tweenStartRef.current) tweenStartRef.current = now;
-        const elapsed = Math.max(0, now - tweenStartRef.current);
-        const rawT = Math.min(1, elapsed / Math.max(effectiveDuration, 1));
-        const easedT = applyPresentationEasing(
-          rawT,
-          resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
-        );
-        next = interpolateOverviewPresentation(tweenFromRef.current, tweenTargetRef.current, easedT);
-        settled = rawT >= 1 || presentationDistance(next, latestTarget) <= threshold;
-      } else {
-        const alphaBase = 1 - Math.exp(-dt / Math.max(effectiveDuration, 1));
-        const alpha = applyPresentationEasing(
-          alphaBase,
-          resolveOverviewPresentationEasing(ingestProgress, isIngestActive)
-        );
-        next = interpolateOverviewPresentation(current, latestTarget, alpha);
-        settled = alpha >= 0.999 || presentationDistance(next, latestTarget) <= threshold;
-      }
-
-      currentRef.current = next;
-
-      if (settled) {
-        currentRef.current = latestTarget;
-        animatedRef.current = latestTarget;
-        setAnimated(latestTarget);
-        emitSettled(true);
+      const next = stepAnimator(now, targetRef.current);
+      if (next === targetRef.current && settledRef.current) {
         frameRef.current = 0;
         lastFrameRef.current = 0;
-        tweenStartRef.current = 0;
-        tweenFromRef.current = latestTarget;
-        tweenTargetRef.current = latestTarget;
         return;
       }
-
-      animatedRef.current = next;
-      setAnimated(next);
       frameRef.current = requestAnimationFrame(step);
     };
 
     frameRef.current = requestAnimationFrame(step);
 
     return undefined;
-  }, [target, duration, ingestProgress, isIngestActive]);
+  }, [target, duration, ingestProgress, isIngestActive, clockNowMs]);
 
   useEffect(() => () => {
     if (frameRef.current) cancelAnimationFrame(frameRef.current);

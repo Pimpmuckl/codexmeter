@@ -5,6 +5,7 @@ import Repos from './components/Repos';
 import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
+import OverviewVideoExport from './components/OverviewVideoExport';
 import { buildLiveDataEnvelope, mergeLiveEvent } from './live-state';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
@@ -20,6 +21,11 @@ function fmtDate(ts) {
   return new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
 }
 
+function dayFloor(ts) {
+  if (!Number.isFinite(ts) || ts <= 0) return 0;
+  return Math.floor(ts / 86400) * 86400;
+}
+
 const PHASE_LABELS = {
   idle: 'Starting...',
   inventory: 'Reading threads',
@@ -32,6 +38,13 @@ const PHASE_LABELS = {
 };
 
 export default function App() {
+  const search = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const exportMode = search?.get('export');
+  const exportJobId = search?.get('job');
+  if (exportMode === 'overview-video' && exportJobId) {
+    return <OverviewVideoExport jobId={exportJobId} />;
+  }
+
   const [progress, setProgress] = useState(null);
   const [tab, setTab] = useState('Overview');
   const [range, setRange] = useState('total');
@@ -44,7 +57,14 @@ export default function App() {
   const [rerunning, setRerunning] = useState(false);
   const [overviewPresentationSettled, setOverviewPresentationSettled] = useState(true);
   const [completionPresentationPending, setCompletionPresentationPending] = useState(false);
+  const [exportJob, setExportJob] = useState(null);
+  const [startingExport, setStartingExport] = useState(false);
+  const [portableDownloadPending, setPortableDownloadPending] = useState(false);
+  const [exportSupport, setExportSupport] = useState({ available: true, reason: null, portable_download: null });
+  const [displayDateRange, setDisplayDateRange] = useState(null);
   const prevBackendCompleteRef = useRef(false);
+  const displayDateAnimationRef = useRef(0);
+  const lastAutoDownloadedExportIdRef = useRef(null);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -73,6 +93,77 @@ export default function App() {
       setRerunning(false);
     }
   }, [rerunning]);
+
+  const handleStartOverviewVideoExport = useCallback(async () => {
+    if (startingExport || ['queued', 'running'].includes(exportJob?.status)) return;
+    try {
+      setStartingExport(true);
+      const canUsePortableBrowser = !exportSupport?.available && exportSupport?.portable_download?.available;
+      let installPortableBrowser = false;
+      if (canUsePortableBrowser) {
+        const sizeHint = exportSupport.portable_download.approx_size_mb
+          ? `about ${exportSupport.portable_download.approx_size_mb} MB`
+          : 'a fairly large download';
+        const confirmed = window.confirm(
+          `No supported browser was found for video export.\n\nCodexMeter can download a single-use portable Chromium bundle (${sizeHint}) for this export only, then delete it afterward.\n\nDo you want to continue?`
+        );
+        if (!confirmed) return;
+        installPortableBrowser = true;
+        setPortableDownloadPending(true);
+      }
+      const job = await api.startOverviewVideoExport(
+        installPortableBrowser ? { install_portable_browser: true } : {}
+      );
+      setExportJob(job);
+    } catch (err) {
+      console.error('Video export error:', err);
+    } finally {
+      setStartingExport(false);
+    }
+  }, [exportJob?.status, exportSupport, startingExport]);
+
+  useEffect(() => {
+    if (!portableDownloadPending) return;
+    if (!exportJob) return;
+    if (exportJob.phase === 'downloading_browser') return;
+    if (exportJob.phase === 'rendering' || exportJob.phase === 'encoding' || exportJob.status === 'complete' || exportJob.status === 'failed') {
+      setPortableDownloadPending(false);
+    }
+  }, [exportJob, portableDownloadPending]);
+
+  const handleDownloadOverviewVideo = useCallback(() => {
+    if (!exportJob?.id || exportJob.status !== 'complete') return;
+    window.location.href = api.url(`/api/export/${encodeURIComponent(exportJob.id)}/file`);
+  }, [exportJob]);
+
+  useEffect(() => {
+    if (!exportJob?.id || exportJob.status !== 'complete') return;
+    if (lastAutoDownloadedExportIdRef.current === exportJob.id) return;
+    lastAutoDownloadedExportIdRef.current = exportJob.id;
+    window.location.href = api.url(`/api/export/${encodeURIComponent(exportJob.id)}/file`);
+  }, [exportJob]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const support = await api.exportSupport();
+        if (alive) setExportSupport(support);
+      } catch (err) {
+        console.error('Export support probe error:', err);
+        if (alive) {
+          setExportSupport({
+            available: false,
+            reason: 'Video export availability could not be detected.',
+            portable_download: null,
+          });
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -278,6 +369,42 @@ export default function App() {
   }, [backendComplete, overviewPresentationSettled, completionPresentationPending]);
 
   useEffect(() => {
+    let alive = true;
+    let timer = null;
+
+    const poll = async () => {
+      try {
+        const isSpecificJob = Boolean(exportJob?.id);
+        const payload = isSpecificJob
+          ? await api.exportStatus(exportJob.id)
+          : await api.activeExport();
+        if (!alive) return;
+        const job = isSpecificJob ? payload : payload.job;
+        if (!job) {
+          if (!exportJob?.id) setExportJob(null);
+          return;
+        }
+        setExportJob(job);
+        if (!['complete', 'failed'].includes(job.status)) {
+          timer = setTimeout(poll, 900);
+        }
+      } catch (err) {
+        if (!alive) return;
+        console.error('Export status error:', err);
+      }
+    };
+
+    if (backendComplete) {
+      poll();
+    }
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [backendComplete, exportJob?.id]);
+
+  useEffect(() => {
     if (!visibleIngesting && !ingestFadeOut) setIngestFadeOut(true);
     if (visibleIngesting) {
       setIngestFadeOut(false);
@@ -303,6 +430,90 @@ export default function App() {
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
   const dateRange = d?.date_range;
+
+  useEffect(() => {
+    if (displayDateAnimationRef.current) {
+      cancelAnimationFrame(displayDateAnimationRef.current);
+      displayDateAnimationRef.current = 0;
+    }
+
+    if (!dateRange?.from || !dateRange?.to) {
+      setDisplayDateRange(null);
+      return undefined;
+    }
+
+    const nextRange = {
+      from: dayFloor(dateRange.from),
+      to: dayFloor(dateRange.to),
+    };
+
+    setDisplayDateRange((prev) => {
+      if (
+        !prev ||
+        backendComplete ||
+        prev.from !== nextRange.from ||
+        nextRange.to <= prev.to
+      ) {
+        return nextRange;
+      }
+
+      const start = prev.to;
+      const end = nextRange.to;
+      const diffDays = Math.max(1, Math.round((end - start) / 86400));
+      const durationMs = Math.min(1400, Math.max(320, diffDays * 110));
+      const startedAt = performance.now();
+
+      const tick = (now) => {
+        const t = Math.min(1, (now - startedAt) / durationMs);
+        const interpolated = dayFloor(start + (end - start) * t);
+        setDisplayDateRange((current) => {
+          if (!current || current.from !== nextRange.from) return current;
+          if (interpolated <= current.to) return current;
+          return { ...current, to: interpolated };
+        });
+        if (t < 1) {
+          displayDateAnimationRef.current = requestAnimationFrame(tick);
+        } else {
+          displayDateAnimationRef.current = 0;
+          setDisplayDateRange(nextRange);
+        }
+      };
+
+      displayDateAnimationRef.current = requestAnimationFrame(tick);
+      return prev;
+    });
+
+    return () => {
+      if (displayDateAnimationRef.current) {
+        cancelAnimationFrame(displayDateAnimationRef.current);
+        displayDateAnimationRef.current = 0;
+      }
+    };
+  }, [backendComplete, dateRange?.from, dateRange?.to]);
+  const exportBusy = startingExport || ['queued', 'running'].includes(exportJob?.status);
+  const exportNeedsPortableBrowser = !exportSupport?.available && exportSupport?.portable_download?.available;
+  const exportDisabledReason = portableDownloadPending
+    ? 'Downloading single-use portable Chromium for this export.'
+    : exportNeedsPortableBrowser && startingExport
+    ? 'Downloading single-use portable Chromium for this export.'
+    : exportNeedsPortableBrowser && exportJob?.phase === 'downloading_browser'
+      ? 'Downloading single-use portable Chromium for this export.'
+    : !exportSupport?.available && !exportNeedsPortableBrowser
+    ? (exportSupport.reason || 'Video export requires Chrome, Chromium, or Edge.')
+    : exportNeedsPortableBrowser
+      ? 'No supported browser found. Click to download a single-use portable Chromium for this export.'
+    : !backendComplete
+      ? 'Finish ingest to render the replay video.'
+      : exportBusy
+        ? 'Video export is already running.'
+        : 'Render Overview ingest replay video';
+  const exportLabel = exportJob?.status === 'complete'
+    ? 'Download MP4'
+    : portableDownloadPending || exportBusy && (startingExport && exportNeedsPortableBrowser || exportJob?.phase === 'downloading_browser')
+      ? `Downloading ${Math.max(1, Math.round((exportJob?.progress || 0.03) * 100))}%`
+    : exportBusy
+      ? `Rendering ${Math.max(1, Math.round((exportJob?.progress || 0) * 100))}%`
+      : 'Render Video';
 
   return (
     <div className="app">
@@ -343,18 +554,10 @@ export default function App() {
             ))}
           </div>
           <div className="navbar-meta">
-            {(visibleIngesting || !ingestFadeDone) && (
-              <div className={`navbar-ingest-wrap ${ingestFadeOut ? 'navbar-ingest-fade-out' : ''}`}>
-                <div className="navbar-progress-wrap">
-                  <div className="navbar-progress-bar" style={{ width: `${pct}%` }} />
-                </div>
-                <span className="incomplete-badge ingesting-badge">ingesting <span className="ingesting-pct">{pct}%</span></span>
-              </div>
-            )}
             {dateRange && (
               <div className={`navbar-date-wrap ${!backendComplete ? 'navbar-date-wrap-dimmed' : ''}`}>
                 <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                  {fmtDate(dateRange.from)} — {fmtDate(dateRange.to)}
+                  {fmtDate(displayDateRange?.from || dateRange.from)} — {fmtDate(displayDateRange?.to || dateRange.to)}
                 </span>
                 <div className="range-toggle">
                   {RANGES.map(r => (
@@ -372,6 +575,16 @@ export default function App() {
                   disabled={rerunning || !backendComplete}
                 >
                   ↻
+                </button>
+                <button
+                  type="button"
+                  className={`navbar-tab active export-video-btn ${!exportSupport?.available ? 'range-btn-unsupported' : ''}`}
+                  onClick={exportJob?.status === 'complete' ? handleDownloadOverviewVideo : handleStartOverviewVideoExport}
+                  disabled={(!exportSupport?.available && !exportNeedsPortableBrowser) || !backendComplete || exportBusy}
+                  style={{ minWidth: 110 }}
+                  title={exportJob?.status === 'complete' ? 'Download rendered Overview video' : exportDisabledReason}
+                >
+                  {exportLabel}
                 </button>
               </div>
             )}
@@ -394,8 +607,8 @@ export default function App() {
               isIngestActive={overviewIngestActive}
             />
           )}
-          {tab === 'Repos' && <Repos data={data.repos} />}
-          {tab === 'Models' && <Models data={data.models} />}
+          {tab === 'Repos' && <Repos data={data.repos} range={range} />}
+          {tab === 'Models' && <Models data={data.models} range={range} />}
           {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}
           {tab === 'Sessions' && <Sessions data={data.sessions} />}
         </div>

@@ -1,13 +1,16 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { attachLiveSubscriber, createIngestState, detachLiveSubscriber, restartIngest, runIngest } from './ingest.js';
+import { attachLiveSubscriber, createIngestState, detachLiveSubscriber, getLatestReplay, restartIngest, runIngest } from './ingest.js';
+import { createJobSummary, createVideoExportManager, getActiveVideoExportJob, getVideoExportJob, getVideoExportSupport, startOverviewVideoExport } from './export-video.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createServer(codexHome, opts = {}) {
   const app = express();
+  app.use(express.json());
   const state = createIngestState();
+  const exportManager = createVideoExportManager();
   const distDir = path.join(__dirname, '..', 'dist');
   const apiOnly = opts.devApiOnly === true;
   const ingestOpts = { ...opts };
@@ -76,6 +79,85 @@ export function createServer(codexHome, opts = {}) {
   app.get('/api/daily', wrap('daily'));
   app.get('/api/heatmap', wrap('heatmap'));
   app.get('/api/families', wrap('families'));
+
+  app.post('/api/export/overview-video', async (req, res) => {
+    const activeJob = getActiveVideoExportJob(exportManager);
+    if (activeJob) {
+      res.status(409).json({ error: 'Another export job is already running.' });
+      return;
+    }
+    const replay = getLatestReplay(state);
+    if (!replay) {
+      res.status(409).json({ error: 'No completed ingest replay is available yet.' });
+      return;
+    }
+
+    const appBaseUrl = opts.frontendBaseUrl || `${req.protocol}://${req.get('host')}`;
+    const settledEnvelope = state.aggregates ? {
+      overview: { data: state.aggregates.overview },
+      repos: { data: state.aggregates.repos },
+      models: { data: state.aggregates.models },
+      families: { data: state.aggregates.families },
+      daily: { data: state.aggregates.daily },
+      heatmap: { data: state.aggregates.heatmap },
+    } : null;
+    try {
+      const job = await startOverviewVideoExport(exportManager, {
+        replay,
+        settledEnvelope,
+        appBaseUrl,
+        installPortableBrowser: Boolean(req.body?.install_portable_browser),
+      });
+      res.status(202).json(createJobSummary(job));
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message || String(err) });
+    }
+  });
+
+  app.get('/api/export/active', (req, res) => {
+    const job = getActiveVideoExportJob(exportManager);
+    if (!job) {
+      res.json({ job: null });
+      return;
+    }
+    res.json({ job: createJobSummary(job) });
+  });
+
+  app.get('/api/export/support', async (_req, res) => {
+    res.json(await getVideoExportSupport());
+  });
+
+  app.get('/api/export/:jobId/status', (req, res) => {
+    const job = getVideoExportJob(exportManager, req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Export job not found.' });
+      return;
+    }
+    res.json(createJobSummary(job));
+  });
+
+  app.get('/api/export/:jobId/render-data', (req, res) => {
+    const job = getVideoExportJob(exportManager, req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Export job not found.' });
+      return;
+    }
+    const payload = exportManager.getRenderPayload(req.params.jobId);
+    if (!payload) {
+      res.status(404).json({ error: 'Export render data not found.' });
+      return;
+    }
+    res.json(payload);
+  });
+
+  app.get('/api/export/:jobId/file', (req, res) => {
+    const job = getVideoExportJob(exportManager, req.params.jobId);
+    if (!job || job.status !== 'complete' || !job.output_path) {
+      res.status(404).json({ error: 'Export file not ready.' });
+      return;
+    }
+    res.download(job.output_path, job.file_name || `codexmeter-overview-${job.id}.mp4`);
+  });
 
   app.get('/api/sessions', (req, res) => {
     const q = (req.query.q || '').toLowerCase();

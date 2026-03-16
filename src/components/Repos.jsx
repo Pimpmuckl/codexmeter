@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
@@ -30,9 +30,9 @@ function exportChart(ref) {
   Object.assign(document.createElement('a'), { href: url, download: 'codexmeter-repos.png' }).click();
 }
 
-function getReposData(data) {
+function getReposData(data, range = 'total') {
   const d = data?.data;
-  return Array.isArray(d) ? d : d?.total || [];
+  return Array.isArray(d) ? d : d?.[range] || d?.total || [];
 }
 
 function RepoDetailCharts({ repo, chartMode }) {
@@ -104,12 +104,12 @@ function RepoDetailCharts({ repo, chartMode }) {
   );
 }
 
-export default function Repos({ data, chartMode = 'default' }) {
+export default function Repos({ data, range = 'total', chartMode = 'default' }) {
   const [family, setFamily] = useState('all');
   const [expanded, setExpanded] = useState(null);
   const chartRef = useRef(null);
 
-  const reposData = getReposData(data);
+  const reposData = useMemo(() => getReposData(data, range), [data, range]);
   const filtered = useMemo(() => {
     if (!reposData?.length) return [];
     if (family === 'all') return reposData;
@@ -122,13 +122,21 @@ export default function Repos({ data, chartMode = 'default' }) {
       .sort((a, b) => b.tokens - a.tokens);
   }, [reposData, family]);
 
+  useEffect(() => {
+    if (!expanded) return;
+    if (!filtered.some((repo) => repo.repo_key === expanded)) {
+      setExpanded(null);
+    }
+  }, [expanded, filtered]);
+
   if (!reposData?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
 
   const top = filtered.slice(0, 15);
   const reversed = [...top].reverse();
   const maxTokens = Math.max(...top.map((repo) => repo.tokens || 0), 0);
+  const chartHeight = Math.max(250, top.length * 28);
 
-  const option = {
+  const option = useMemo(() => ({
     backgroundColor: 'transparent',
     ...ECHARTS_ANIMATION,
     tooltip: {
@@ -155,12 +163,28 @@ export default function Repos({ data, chartMode = 'default' }) {
     },
     yAxis: { type: 'category', data: reversed.map((r) => r.repo_label), axisLabel: { color: '#8b949e', fontSize: 11 }, axisTick: { show: false }, axisLine: { show: false } },
     series: [{
+      id: 'repos-range-bars',
       type: 'bar',
-      data: reversed.map((r) => ({ value: r.tokens, itemStyle: { color: getRepoColor(r.repo_label), borderRadius: [0, 3, 3, 0] } })),
+      universalTransition: true,
+      data: reversed.map((r) => ({
+        id: r.repo_key,
+        name: r.repo_label,
+        value: r.tokens,
+        itemStyle: { color: getRepoColor(r.repo_label), borderRadius: [0, 3, 3, 0] },
+      })),
       barMaxWidth: 16,
       label: { show: true, position: 'right', formatter: (p) => fmt(p.value ?? 0), color: '#8b949e', fontSize: 10, ...ECHARTS_LABEL_ANIMATION },
     }],
-  };
+  }), [maxTokens, reversed, top]);
+
+  const chartEvents = useMemo(() => ({
+    click: (params) => {
+      if (params?.componentType === 'series' && params?.dataIndex != null) {
+        const repo = top[top.length - 1 - params.dataIndex];
+        if (repo) setExpanded((current) => current === repo.repo_key ? null : repo.repo_key);
+      }
+    },
+  }), [top]);
 
   return (
     <div className="animate-in">
@@ -173,23 +197,18 @@ export default function Repos({ data, chartMode = 'default' }) {
 
       <div className="chart-card">
         <button className="export-btn" onClick={() => exportChart(chartRef)}>PNG</button>
-        <ReactEChartsCore
-          ref={chartRef}
-          echarts={echarts}
-          option={option}
-          style={{ height: Math.max(250, top.length * 28) }}
-          theme="dark"
-          lazyUpdate={true}
-          notMerge={false}
-          onEvents={{
-            click: (params) => {
-              if (params?.componentType === 'series' && params?.dataIndex != null) {
-                const repo = top[top.length - 1 - params.dataIndex];
-                if (repo) setExpanded(expanded === repo.repo_key ? null : repo.repo_key);
-              }
-            },
-          }}
-        />
+        <div style={{ height: chartHeight, transition: 'height 220ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+          <ReactEChartsCore
+            ref={chartRef}
+            echarts={echarts}
+            option={option}
+            style={{ height: '100%' }}
+            theme="dark"
+            lazyUpdate={true}
+            notMerge={false}
+            onEvents={chartEvents}
+          />
+        </div>
       </div>
 
       <div className="table-wrap">
