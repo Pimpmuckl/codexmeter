@@ -95,6 +95,7 @@ function spawnPackagedCli(tarballName, codexHome, cwd) {
     ['exec', '--yes', '--package', tarballName, '--', 'codexmeter', '--codex-home', codexHome, '--no-open', '--port', '0'],
     {
       cwd,
+      detached: true,
       env: { ...process.env, CODEX_HOME: codexHome },
       stdio: ['ignore', 'pipe', 'pipe'],
     }
@@ -149,10 +150,47 @@ function extractPackEntries(stdout, stderr) {
 }
 
 async function terminate(proc) {
-  if (proc.killed) return;
-  proc.kill('SIGTERM');
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  if (!proc.killed) proc.kill('SIGKILL');
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+
+  if (process.platform === 'win32') {
+    await runAndCapture('taskkill.exe', ['/pid', String(proc.pid), '/t', '/f'], {}).catch(() => {});
+  } else {
+    try {
+      process.kill(-proc.pid, 'SIGTERM');
+    } catch {}
+    if (!await waitForExit(proc, 1500)) {
+      try {
+        process.kill(-proc.pid, 'SIGKILL');
+      } catch {}
+    }
+  }
+
+  await waitForExit(proc, 3000).catch(() => {});
+}
+
+function waitForExit(proc, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve(true);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      proc.off('exit', onExit);
+      resolve(false);
+    }, timeoutMs);
+
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+
+    proc.once('exit', onExit);
+    proc.once('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
 }
 
 async function waitForOk(url) {
