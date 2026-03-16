@@ -176,6 +176,13 @@ export default function App() {
     let frameId = 0;
     let liveStateRef = null;
     let progressRef = null;
+    let sseFallbackTimer = null;
+
+    const clearSseFallbackTimer = () => {
+      if (!sseFallbackTimer) return;
+      clearTimeout(sseFallbackTimer);
+      sseFallbackTimer = null;
+    };
 
     const flushQueuedEvents = () => {
       frameId = 0;
@@ -208,6 +215,7 @@ export default function App() {
 
     const enqueueLivePayload = (payload, mode, progressOnly = false) => {
       queuedEvents.push({ payload, mode, progressOnly });
+      clearSseFallbackTimer();
       if (!frameId) {
         frameId = requestAnimationFrame(flushQueuedEvents);
       }
@@ -306,9 +314,21 @@ export default function App() {
       source.addEventListener('error', (event) => {
         if (!alive) return;
         if (terminalSseState) return;
-        console.error('SSE stream error:', event);
-        source?.close();
-        startFallbackPolling();
+        if (source?.readyState === EventSource.CLOSED) {
+          console.warn('SSE stream closed, falling back to polling:', event);
+          startFallbackPolling();
+          return;
+        }
+        if (source?.readyState === EventSource.CONNECTING && !usingFallback && !sseFallbackTimer) {
+          sseFallbackTimer = setTimeout(() => {
+            sseFallbackTimer = null;
+            if (!alive || terminalSseState || usingFallback) return;
+            if (source?.readyState === EventSource.OPEN) return;
+            console.warn('SSE stream stalled during reconnect, falling back to polling:', event);
+            source?.close();
+            startFallbackPolling();
+          }, 4000);
+        }
       });
     };
 
@@ -317,6 +337,7 @@ export default function App() {
     return () => {
       alive = false;
       clearInterval(interval);
+      clearSseFallbackTimer();
       if (frameId) cancelAnimationFrame(frameId);
       source?.close();
     };

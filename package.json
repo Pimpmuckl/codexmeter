@@ -6,6 +6,9 @@
   "bin": {
     "codexmeter": "./bin/codexmeter.js"
   },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "files": [
     "bin",
     "server",
@@ -18,31 +21,32 @@
     "dev": "node dev-runner.js",
     "build": "vite build",
     "prepack": "npm run build",
-    "test": "node --test test/*.test.js",
+    "pretest": "npm run build",
+    "test": "node --test \"test/*.test.js\" \"test/**/*.test.js\"",
     "start": "node bin/codexmeter.js",
     "preview": "npm run build && node bin/codexmeter.js",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
-    "commander": "^13.1.0",
+    "better-sqlite3": "^12.8.0",
+    "commander": "^14.0.3",
     "express": "^5.1.0",
     "fast-glob": "^3.3.3",
     "ffmpeg-static": "^5.2.0",
-    "open": "^10.1.0",
+    "open": "^11.0.0",
     "playwright-core": "^1.58.2"
   },
   "devDependencies": {
     "@tanstack/react-table": "^8.21.3",
-    "@tanstack/react-virtual": "^3.13.6",
+    "@tanstack/react-virtual": "^3.13.23",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.4.1",
-    "echarts": "^5.6.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.2",
     "nodemon": "^3.1.14",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "vite": "^6.3.5"
+    "vite": "^8.0.0"
   }
 }
