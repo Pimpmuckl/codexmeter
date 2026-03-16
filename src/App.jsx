@@ -306,9 +306,10 @@ export default function App() {
       source.addEventListener('error', (event) => {
         if (!alive) return;
         if (terminalSseState) return;
-        console.error('SSE stream error:', event);
-        source?.close();
-        startFallbackPolling();
+        if (source?.readyState === EventSource.CLOSED) {
+          console.warn('SSE stream closed; relying on browser reconnect if available:', event);
+          return;
+        }
       });
     };
 

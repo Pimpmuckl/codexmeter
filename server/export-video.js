@@ -1,5 +1,4 @@
 import fs from 'fs/promises';
-import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -9,6 +8,7 @@ import { createRequire } from 'module';
 import ffmpegPath from 'ffmpeg-static';
 import { chromium } from 'playwright-core';
 import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
+import { findSupportedBrowserExecutable } from './browser-detection.js';
 
 const EXPORT_WIDTH = OVERVIEW_INGEST_ANIMATION.videoExport?.width ?? 1080;
 const EXPORT_HEIGHT = OVERVIEW_INGEST_ANIMATION.videoExport?.height ?? 864;
@@ -703,39 +703,6 @@ function resolvePlaywrightCliPath() {
   const packageJsonPath = require.resolve('playwright-core/package.json');
   const packageRoot = path.dirname(packageJsonPath);
   return path.join(packageRoot, 'cli.js');
-}
-
-function findSupportedBrowserExecutable() {
-  if (process.env.CODEXMETER_EXPORT_DEBUG_FORCE_UNSUPPORTED === '1') {
-    return null;
-  }
-  if (process.env.CODEXMETER_EXPORT_BROWSER && fsSync.existsSync(process.env.CODEXMETER_EXPORT_BROWSER)) {
-    return process.env.CODEXMETER_EXPORT_BROWSER;
-  }
-
-  const candidates = process.platform === 'win32'
-    ? [
-      process.env['PROGRAMFILES'] ? path.join(process.env['PROGRAMFILES'], 'Google', 'Chrome', 'Application', 'chrome.exe') : null,
-      process.env['PROGRAMFILES(X86)'] ? path.join(process.env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe') : null,
-      process.env['PROGRAMFILES'] ? path.join(process.env['PROGRAMFILES'], 'Microsoft', 'Edge', 'Application', 'msedge.exe') : null,
-      process.env['PROGRAMFILES(X86)'] ? path.join(process.env['PROGRAMFILES(X86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe') : null,
-    ]
-    : process.platform === 'darwin'
-      ? [
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-      ]
-      : [
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/microsoft-edge',
-      ];
-
-  for (const candidate of candidates.filter(Boolean)) {
-    if (fsSync.existsSync(candidate)) return candidate;
-  }
-  return null;
 }
 
 async function encodeFramesToMp4(framesDir, outputPath, { captureFormat, fps, frameCount, durationMs, crf, encoderPreset, outputWidth, outputHeight }) {
