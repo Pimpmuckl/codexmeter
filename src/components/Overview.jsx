@@ -65,35 +65,8 @@ function getOverviewDailyBarSizing(count) {
 }
 
 function buildOverviewDonutRows(rows, getColor) {
-  const positiveRows = rows.filter((row) => (row.tokens || 0) > 0);
-  const singleRow = positiveRows.length === 1 ? positiveRows[0] : null;
   return rows.map((row) => {
     const color = getColor(row.key);
-    if (singleRow && row.key === singleRow.key) {
-      return {
-        name: row.label,
-        value: row.tokens,
-        itemStyle: { color },
-        label: {
-          show: true,
-          position: 'center',
-          formatter: '{b}',
-          color,
-          fontSize: 12,
-          fontWeight: 600,
-        },
-        labelLine: { show: false },
-      };
-    }
-    if (singleRow) {
-      return {
-        name: row.label,
-        value: row.tokens,
-        itemStyle: { color },
-        label: { show: false },
-        labelLine: { show: false },
-      };
-    }
     return {
       name: row.label,
       value: row.tokens,
@@ -102,6 +75,24 @@ function buildOverviewDonutRows(rows, getColor) {
       labelLine: { show: true },
     };
   });
+}
+
+function buildSingleDonutLabelLayout(activeRows) {
+  if (activeRows.length !== 1) return null;
+  return (params) => {
+    const sectorRect = params.rect || { x: 0, y: 0, width: 0, height: 0 };
+    const labelRect = params.labelRect || { width: 0, height: 0 };
+    const x = sectorRect.x + sectorRect.width + 14;
+    const y = sectorRect.y + (sectorRect.height / 2) - (labelRect.height / 2);
+    return {
+      x,
+      y,
+      align: 'left',
+      verticalAlign: 'middle',
+      moveOverlap: 'shiftY',
+      hideOverlap: false,
+    };
+  };
 }
 
 function DailySpark({ daily, exportMode = false }) {
@@ -385,6 +376,8 @@ export function OverviewFrame({
   };
 
   const familyTotal = orderedFamilies.reduce((sum, row) => sum + (row.tokens || 0), 0);
+  const visibleFamilyRows = orderedFamilies.filter((row) => (familyTotal > 0 ? ((row.tokens || 0) / familyTotal) >= 0.01 : false));
+  const familySingleLabelLayout = buildSingleDonutLabelLayout(visibleFamilyRows);
   const familyOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
@@ -402,19 +395,20 @@ export function OverviewFrame({
     series: [{
       type: 'pie',
       animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      avoidLabelOverlap: !familySingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: buildOverviewDonutRows(
-        orderedFamilies.filter((row) => (familyTotal > 0 ? ((row.tokens || 0) / familyTotal) >= 0.01 : false)),
-        getFamilyColor
-      ),
+      ...(familySingleLabelLayout ? { labelLayout: familySingleLabelLayout } : {}),
+      data: buildOverviewDonutRows(visibleFamilyRows, getFamilyColor),
     }],
   };
 
   const modelTotal = orderedModels.reduce((sum, row) => sum + (row.tokens || 0), 0);
+  const visibleModelRows = orderedModels.filter((row) => (modelTotal > 0 ? ((row.tokens || 0) / modelTotal) >= 0.01 : false));
+  const modelSingleLabelLayout = buildSingleDonutLabelLayout(visibleModelRows);
   const modelOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
@@ -432,15 +426,14 @@ export function OverviewFrame({
     series: [{
       type: 'pie',
       animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      avoidLabelOverlap: !modelSingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: { show: true, color: '#8b949e', fontSize: 11, formatter: '{b}' },
       labelLine: { lineStyle: { color: '#30363d' } },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      data: buildOverviewDonutRows(
-        orderedModels.filter((row) => (modelTotal > 0 ? ((row.tokens || 0) / modelTotal) >= 0.01 : false)),
-        getModelColor
-      ),
+      ...(modelSingleLabelLayout ? { labelLayout: modelSingleLabelLayout } : {}),
+      data: buildOverviewDonutRows(visibleModelRows, getModelColor),
     }],
   };
 
