@@ -63,6 +63,9 @@ export function isSubagent(agentRole) {
 const MODEL_ALIASES = {
   'codex-mini-latest': 'o4-mini',
   'gpt-5.2': 'gpt-5.2-codex',
+  'gpt-5 mini': 'gpt-5.4-mini',
+  'gpt-5-mini': 'gpt-5.4-mini',
+  'gpt-5.4 mini': 'gpt-5.4-mini',
 };
 
 export function normalizeModelName(rawModel) {
