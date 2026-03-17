@@ -1,6 +1,8 @@
 // Local pricing catalog for models used in codex-cli/codex app lifetime.
 const FALLBACK = {
   'gpt-5.4':             { input: 2.50,  output: 15.00, cached_input: 0.25 },
+  'gpt-5-mini':          { input: 0.75,  output:  4.50, cached_input: 0.075},
+  'gpt-5.4-nano':        { input: 0.15,  output:  0.60, cached_input: 0.015},
   'gpt-5.3-codex':       { input: 2.00,  output: 10.00, cached_input: 0.20 },
   'gpt-5.3-codex-spark': { input: 2.00,  output: 10.00, cached_input: 0.20 },
   'gpt-5.2-codex':       { input: 2.00,  output: 10.00, cached_input: 0.20 },
