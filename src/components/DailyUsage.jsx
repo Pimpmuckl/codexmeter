@@ -242,7 +242,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
   const zoomAnimRafRef = useRef(0);
   const lastRangeForZoomRef = useRef(null);
   const lastCountForZoomRef = useRef(0);
-  const dates = daily.map((d) => d.date);
+  const dates = useMemo(() => daily.map((d) => d.date), [daily]);
   const curMetric = METRICS.find((m) => m.key === metric);
   const targetZoomWindow = useMemo(() => getZoomWindow(range, dates.length), [range, dates.length]);
 
@@ -387,8 +387,10 @@ const DailyMainChart = React.memo(function DailyMainChart({
     if (!maxVisibleDayTotal) return undefined;
     return Math.ceil(maxVisibleDayTotal * 1.1);
   }, [displayMode, maxVisibleDayTotal]);
-  let cumulativeData = null;
-  if (isRelative) {
+
+  const cumulativeData = useMemo(() => {
+    if (!isRelative) return null;
+    if (!rawSeriesData.length) return [];
     const allVals = rawSeriesData.map((s) => {
       const vals = s.values.map((v, j) => (dayTotals[j] > 0 ? (v / dayTotals[j]) * 100 : 0));
       for (let j = 1; j < vals.length; j++) {
@@ -397,55 +399,59 @@ const DailyMainChart = React.memo(function DailyMainChart({
       return vals;
     });
     let cum = allVals[0].map(() => 0);
-    cumulativeData = allVals.map((vals, i) => {
+    return allVals.map((vals, i) => {
       const prevStack = [...cum];
       cum = cum.map((c, j) => c + vals[j]);
       return { values: vals, prevStack };
     });
-  }
-  const series = groups.map((g, seriesIdx) => {
-    const color = split === 'model' ? getModelColor(g) : getFamilyColor(g);
-    let data;
+  }, [isRelative, rawSeriesData, dayTotals]);
+
+  const series = useMemo(() => {
     if (isRelative) {
-      const s = rawSeriesData[seriesIdx];
-      if (!s) return null;
-      const cd = cumulativeData[seriesIdx];
-      data = cd.values;
-      const labelColor = getContrastLabelColor(color);
-      let labelIdx = 0;
-      let maxVal = 0;
-      for (let j = 0; j < data.length; j++) {
-        if (data[j] > maxVal) {
-          maxVal = data[j];
-          labelIdx = j;
-        }
-      }
-      const showLabel = maxVal >= 8;
-      const centerY = showLabel ? cd.prevStack[labelIdx] + data[labelIdx] / 2 : 0;
+      return groups.map((g, seriesIdx) => {
+        const color = split === 'model' ? getModelColor(g) : getFamilyColor(g);
+        const s = rawSeriesData[seriesIdx];
+        if (!s) return null;
+        const cd = cumulativeData[seriesIdx];
+        if (!cd) return null;
+        return {
+          name: g,
+          type: 'line',
+          stack: 'total',
+          smooth: 0.2,
+          areaStyle: { opacity: 1 },
+          lineStyle: { width: 0 },
+          symbol: 'none',
+          data: cd.values,
+          itemStyle: { color },
+        };
+      }).filter(Boolean);
+    }
+    return groups.map((g) => {
+      const color = split === 'model' ? getModelColor(g) : getFamilyColor(g);
+      const data = animatedByKey.get(g)?.data ?? dates.map(() => 0);
       return {
         name: g,
-        type: 'line',
+        type: 'bar',
         stack: 'total',
-        smooth: 0.2,
-        areaStyle: { opacity: 1 },
-        lineStyle: { width: 0 },
-        symbol: 'none',
         data,
         itemStyle: { color },
+        barWidth: visibleBarPercent,
+        barMaxWidth: visibleBarWidth,
+        barMinWidth: Math.min(10, visibleBarWidth),
       };
-    }
-    data = animatedByKey.get(g)?.data ?? dates.map(() => 0);
-    return {
-      name: g,
-      type: 'bar',
-      stack: 'total',
-      data,
-      itemStyle: { color },
-      barWidth: visibleBarPercent,
-      barMaxWidth: visibleBarWidth,
-      barMinWidth: Math.min(10, visibleBarWidth),
-    };
-  }).filter(Boolean);
+    });
+  }, [
+    isRelative,
+    groups,
+    split,
+    cumulativeData,
+    rawSeriesData,
+    animatedByKey,
+    dates,
+    visibleBarPercent,
+    visibleBarWidth,
+  ]);
 
   const labelSpecs = useMemo(() => {
     if (!isRelative || !cumulativeData) return [];
@@ -510,7 +516,8 @@ const DailyMainChart = React.memo(function DailyMainChart({
       appendToBody: true,
       confine: true,
       formatter: (params) => {
-        const dayIdx = params?.[0]?.dataIndex;
+        if (!params?.length) return '';
+        const dayIdx = params[0]?.dataIndex;
         const totalsForTip = tooltipDayTotals;
         const total = dayIdx != null ? totalsForTip[dayIdx] : 0;
         let prevIdx = dayIdx;
@@ -523,7 +530,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
           }
         }
         const displayTotal = displayMode === 'relative' && total === 0 ? (totalsForTip[prevIdx] ?? 0) : total;
-        let html = `<b>${params[0].axisValue}</b><br/>`;
+        let html = `<b>${params[0]?.axisValue ?? ''}</b><br/>`;
         const sorted = [...params].filter((p) => p.value > 0).sort((a, b) => (b.value || 0) - (a.value || 0));
         for (const p of sorted) {
           const rawVal = displayMode === 'relative'
@@ -586,7 +593,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
         theme="dark"
         notMerge={false}
         replaceMerge={['series', 'legend', 'graphic']}
-        lazyUpdate={isRelative}
+        lazyUpdate={false}
         onChartReady={updateGraphicLabels}
         onEvents={{
           click: (params) => {

@@ -27,6 +27,10 @@ test('dashboard tabs render and basic interactions survive in a real browser', a
       args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
     });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+    const pageErrors = [];
+    page.on('pageerror', (err) => {
+      pageErrors.push(err.message);
+    });
     await page.goto(url, { waitUntil: 'domcontentloaded' });
 
     await page.getByText('Top Repos', { exact: true }).waitFor();
@@ -37,6 +41,16 @@ test('dashboard tabs render and basic interactions survive in a real browser', a
     await page.getByText('Daily Usage', { exact: true }).waitFor();
     await page.getByRole('button', { name: '7d' }).click();
     await page.getByText('Daily Usage', { exact: true }).waitFor();
+
+    await page.getByRole('button', { name: 'Relative' }).click();
+    await page.waitForTimeout(400);
+    await page.getByText('Daily Usage', { exact: true }).waitFor();
+    assert.ok(
+      !pageErrors.some((m) => m.includes('Maximum update depth')),
+      `Daily Relative mode should not React-loop: ${pageErrors.join(' | ')}`,
+    );
+    await page.getByRole('button', { name: 'Absolute' }).click();
+    await page.waitForTimeout(200);
 
     await page.getByRole('button', { name: 'Repos' }).click();
     await page.getByRole('cell', { name: /nextide-web|nextide-api|codexmeter/ }).first().click();

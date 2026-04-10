@@ -30,27 +30,39 @@ export function useDailyStackPresentationTween(targetDaily, enabled, scaleResetK
   const frameRef = useRef(0);
   const lastFrameRef = useRef(0);
   const committedKeyRef = useRef(scaleResetKey);
+  const prevEnabledRef = useRef(enabled);
   const pendingKey = enabled && committedKeyRef.current !== scaleResetKey;
 
   useLayoutEffect(() => {
     targetRef.current = targetDaily;
+    const turnedOn = !prevEnabledRef.current && enabled;
+    prevEnabledRef.current = enabled;
+
     if (!enabled) {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
       lastFrameRef.current = 0;
       currentRef.current = targetDaily;
-      setAnimated(targetDaily);
       committedKeyRef.current = scaleResetKey;
       return;
     }
-    if (committedKeyRef.current === scaleResetKey) return;
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    frameRef.current = 0;
-    lastFrameRef.current = 0;
-    const z = emptyDailyLike(targetDaily);
-    currentRef.current = z;
-    setAnimated(z);
-    committedKeyRef.current = scaleResetKey;
+
+    const keyMismatch = committedKeyRef.current !== scaleResetKey;
+    if (keyMismatch) {
+      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      frameRef.current = 0;
+      lastFrameRef.current = 0;
+      const z = emptyDailyLike(targetDaily);
+      currentRef.current = z;
+      setAnimated(z);
+      committedKeyRef.current = scaleResetKey;
+      return;
+    }
+
+    if (turnedOn) {
+      currentRef.current = targetDaily;
+      setAnimated(targetDaily);
+    }
   }, [targetDaily, enabled, scaleResetKey]);
 
   useEffect(() => {
