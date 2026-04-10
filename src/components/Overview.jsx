@@ -85,6 +85,32 @@ function scaleMetricRows(rows, scale) {
   }));
 }
 
+function buildOrderedMetricRows(orderRows, valueRows) {
+  const valueMap = new Map((valueRows || []).map((row) => [row.key, row]));
+  const ordered = [];
+  const seen = new Set();
+  for (const row of orderRows || []) {
+    if (!row?.key || seen.has(row.key)) continue;
+    seen.add(row.key);
+    const valueRow = valueMap.get(row.key);
+    ordered.push({
+      key: row.key,
+      label: valueRow?.label || row.label,
+      tokens: Math.max(0, valueRow?.tokens ?? row.tokens ?? 0),
+    });
+  }
+  for (const row of valueRows || []) {
+    if (!row?.key || seen.has(row.key)) continue;
+    seen.add(row.key);
+    ordered.push({
+      key: row.key,
+      label: row.label,
+      tokens: Math.max(0, row.tokens || 0),
+    });
+  }
+  return ordered;
+}
+
 function buildSingleDonutLabelLayout(activeRows) {
   if (activeRows.length !== 1) return null;
   return (params) => {
@@ -348,13 +374,22 @@ export function OverviewFrame({
     : presentation.heatmap;
   const { stats, topRepos, topFamilies, topModels } = presentation;
   const chartTopRepos = exportPlayback && exportPhase === 'replay'
-    ? scaleMetricRows(chartPresentation.topRepos || [], exportChartIntroProgress)
+    ? scaleMetricRows(
+      buildOrderedMetricRows(rawPresentation?.topRepos || chartPresentation.topRepos || [], presentation.topRepos || chartPresentation.topRepos || []),
+      exportChartIntroProgress
+    )
     : (chartPresentation.topRepos || []);
   const chartTopFamilies = exportPlayback && exportPhase === 'replay'
-    ? scaleMetricRows(chartPresentation.topFamilies || [], exportChartIntroProgress)
+    ? scaleMetricRows(
+      buildOrderedMetricRows(rawPresentation?.topFamilies || chartPresentation.topFamilies || [], presentation.topFamilies || chartPresentation.topFamilies || []),
+      exportChartIntroProgress
+    )
     : (chartPresentation.topFamilies || []);
   const chartTopModels = exportPlayback && exportPhase === 'replay'
-    ? scaleMetricRows(chartPresentation.topModels || [], exportChartIntroProgress)
+    ? scaleMetricRows(
+      buildOrderedMetricRows(rawPresentation?.topModels || chartPresentation.topModels || [], presentation.topModels || chartPresentation.topModels || []),
+      exportChartIntroProgress
+    )
     : (chartPresentation.topModels || []);
   const reversedRepos = [...chartTopRepos.slice(0, 6)].reverse();
   const maxRepoTokens = Math.max(...chartTopRepos.slice(0, 6).map(row => row.tokens || 0), 1);
@@ -707,14 +742,17 @@ export default memo(Overview, areOverviewPropsEqual);
 function resolveExportChartUpdateDuration(seekMs, introDurationMs, steadyDurationMs) {
   const intro = Math.max(introDurationMs ?? steadyDurationMs ?? 0, steadyDurationMs ?? 0);
   const steady = Math.max(steadyDurationMs ?? 0, 0);
-  const introWindowMs = Math.max(OVERVIEW_INGEST_ANIMATION.videoExport?.chartIntroWindowMs ?? 2200, 1);
-  const progress = Math.min(Math.max((seekMs || 0) / introWindowMs, 0), 1);
-  const eased = progress * progress * progress;
+  const eased = resolveExportChartIntroBlend(seekMs);
   return Math.round(intro + ((steady - intro) * eased));
 }
 
 function resolveExportChartIntroProgress(seekMs) {
+  return resolveExportChartIntroBlend(seekMs);
+}
+
+function resolveExportChartIntroBlend(seekMs) {
   const introWindowMs = Math.max(OVERVIEW_INGEST_ANIMATION.videoExport?.chartIntroWindowMs ?? 2200, 1);
-  const progress = Math.min(Math.max((seekMs || 0) / introWindowMs, 0), 1);
-  return progress * progress;
+  const elapsed = Math.max(seekMs || 0, 0);
+  const tau = introWindowMs / 3;
+  return Math.min(1, 1 - Math.exp(-elapsed / Math.max(tau, 1)));
 }

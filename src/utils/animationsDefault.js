@@ -99,7 +99,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
 
     // Tail Settings
     tailDurationMs: 5000,
-    replayEasing: 'cubicIn',
+    replayEasing: 'cubicInOut',
     tailSourceFraction: 0.55,
     tailEasing: 'cubicOut',
     finalHoldDurationMs: 5000,
