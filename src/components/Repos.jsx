@@ -104,10 +104,17 @@ function RepoDetailCharts({ repo, chartMode }) {
   );
 }
 
-export default function Repos({ data, range = 'total', chartMode = 'default' }) {
+export default function Repos({
+  data,
+  range = 'total',
+  chartMode = 'default',
+  focusRequest = null,
+  onFocusRequestConsumed,
+}) {
   const [family, setFamily] = useState('all');
   const [expanded, setExpanded] = useState(null);
   const chartRef = useRef(null);
+  const appliedFocusIdRef = useRef(null);
 
   const reposData = useMemo(() => getReposData(data, range), [data, range]);
   const filtered = useMemo(() => {
@@ -128,6 +135,21 @@ export default function Repos({ data, range = 'total', chartMode = 'default' }) 
       setExpanded(null);
     }
   }, [expanded, filtered]);
+
+  useEffect(() => {
+    if (!focusRequest) {
+      appliedFocusIdRef.current = null;
+      return;
+    }
+    const { id, repoLabel } = focusRequest;
+    if (!repoLabel || appliedFocusIdRef.current === id) return;
+    const match = reposData.find(
+      (r) => r.repo_label === repoLabel || r.repo_key === repoLabel
+    );
+    appliedFocusIdRef.current = id;
+    if (match) setExpanded(match.repo_key);
+    onFocusRequestConsumed?.();
+  }, [focusRequest, reposData, onFocusRequestConsumed]);
 
   if (!reposData?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
 

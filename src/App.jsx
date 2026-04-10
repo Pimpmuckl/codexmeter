@@ -62,6 +62,9 @@ export default function App() {
   const [portableDownloadPending, setPortableDownloadPending] = useState(false);
   const [exportSupport, setExportSupport] = useState({ available: true, reason: null, portable_download: null });
   const [displayDateRange, setDisplayDateRange] = useState(null);
+  const [dailyNavigateRequest, setDailyNavigateRequest] = useState(null);
+  const [reposFocusRequest, setReposFocusRequest] = useState(null);
+  const [modelsFocusRequest, setModelsFocusRequest] = useState(null);
   const prevBackendCompleteRef = useRef(false);
   const displayDateAnimationRef = useRef(0);
   const lastAutoDownloadedExportIdRef = useRef(null);
@@ -528,6 +531,25 @@ export default function App() {
       : exportBusy
         ? 'Video export is already running.'
         : 'Render Overview ingest replay video';
+  const handleNavigateToDailyDay = useCallback((isoDate) => {
+    if (!isoDate) return;
+    setRange('d7');
+    setTab('Daily');
+    setDailyNavigateRequest({ id: Date.now(), centerDate: isoDate });
+  }, []);
+
+  const handleNavigateToRepo = useCallback((repoLabel) => {
+    if (!repoLabel) return;
+    setTab('Repos');
+    setReposFocusRequest({ id: Date.now(), repoLabel: String(repoLabel) });
+  }, []);
+
+  const handleNavigateToModel = useCallback((modelName) => {
+    if (!modelName) return;
+    setTab('Models');
+    setModelsFocusRequest({ id: Date.now(), modelName: String(modelName) });
+  }, []);
+
   const exportLabel = exportJob?.status === 'complete'
     ? 'Download MP4'
     : portableDownloadPending || exportBusy && (startingExport && exportNeedsPortableBrowser || exportJob?.phase === 'downloading_browser')
@@ -626,11 +648,35 @@ export default function App() {
               onPresentationSettledChange={setOverviewPresentationSettled}
               ingestProgress={overviewIngestProgress}
               isIngestActive={overviewIngestActive}
+              onNavigateToDailyDay={handleNavigateToDailyDay}
+              onNavigateToRepo={handleNavigateToRepo}
+              onNavigateToModel={handleNavigateToModel}
             />
           )}
-          {tab === 'Repos' && <Repos data={data.repos} range={range} />}
-          {tab === 'Models' && <Models data={data.models} range={range} />}
-          {tab === 'Daily' && <DailyUsage data={data.daily} range={range} />}
+          {tab === 'Repos' && (
+            <Repos
+              data={data.repos}
+              range={range}
+              focusRequest={reposFocusRequest}
+              onFocusRequestConsumed={() => setReposFocusRequest(null)}
+            />
+          )}
+          {tab === 'Models' && (
+            <Models
+              data={data.models}
+              range={range}
+              focusRequest={modelsFocusRequest}
+              onFocusRequestConsumed={() => setModelsFocusRequest(null)}
+            />
+          )}
+          {tab === 'Daily' && (
+            <DailyUsage
+              data={data.daily}
+              range={range}
+              navigateToDayRequest={dailyNavigateRequest}
+              onNavigateToDayConsumed={() => setDailyNavigateRequest(null)}
+            />
+          )}
           {tab === 'Sessions' && <Sessions data={data.sessions} />}
         </div>
         <div className="app-footer">Made with <span className="loading-heart">♥</span> by JJ</div>

@@ -180,6 +180,8 @@ const DailyMainChart = React.memo(function DailyMainChart({
   split,
   displayMode,
   onSelectDate,
+  navigateToDayRequest,
+  onNavigateToDayConsumed,
 }) {
   const [zoomWindow, setZoomWindow] = useState({ startValue: 0, endValue: 0 });
   const chartRef = useRef(null);
@@ -190,6 +192,29 @@ const DailyMainChart = React.memo(function DailyMainChart({
   useEffect(() => {
     setZoomWindow(targetZoomWindow);
   }, [targetZoomWindow]);
+
+  const appliedNavigateIdRef = useRef(null);
+  useEffect(() => {
+    if (!navigateToDayRequest) {
+      appliedNavigateIdRef.current = null;
+      return;
+    }
+    const { id, centerDate } = navigateToDayRequest;
+    if (!centerDate || !daily.length) return;
+    if (appliedNavigateIdRef.current === id) return;
+    const dateList = daily.map((d) => d.date);
+    const idx = dateList.indexOf(centerDate);
+    if (idx < 0) {
+      onNavigateToDayConsumed?.();
+      return;
+    }
+    appliedNavigateIdRef.current = id;
+    const startIdx = Math.max(0, idx - 3);
+    const endIdx = Math.min(dateList.length - 1, idx + 3);
+    setZoomWindow({ startValue: startIdx, endValue: endIdx });
+    onSelectDate(centerDate);
+    onNavigateToDayConsumed?.();
+  }, [navigateToDayRequest, daily, onSelectDate, onNavigateToDayConsumed]);
 
   const visibleDateCount = useMemo(() => {
     if (!dates.length) return 0;
@@ -481,7 +506,13 @@ const DailyMainChart = React.memo(function DailyMainChart({
   );
 });
 
-export default function DailyUsage({ data, range = 'total', chartMode = 'default' }) {
+export default function DailyUsage({
+  data,
+  range = 'total',
+  chartMode = 'default',
+  navigateToDayRequest = null,
+  onNavigateToDayConsumed,
+}) {
   const [metric, setMetric] = useState('tokens');
   const [split, setSplit] = useState('model');
   const [displayMode, setDisplayMode] = useState('absolute');
@@ -527,6 +558,8 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
         split={split}
         displayMode={displayMode}
         onSelectDate={handleSelectDate}
+        navigateToDayRequest={navigateToDayRequest}
+        onNavigateToDayConsumed={onNavigateToDayConsumed}
       />
 
       {selectedDay && (

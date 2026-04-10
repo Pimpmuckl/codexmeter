@@ -149,9 +149,16 @@ function getModelsData(data, range = 'total') {
   return Array.isArray(d) ? d : d?.[range] || d?.total || [];
 }
 
-export default function Models({ data, range = 'total', chartMode = 'default' }) {
+export default function Models({
+  data,
+  range = 'total',
+  chartMode = 'default',
+  focusRequest = null,
+  onFocusRequestConsumed,
+}) {
   const [expanded, setExpanded] = useState(null);
   const chartRef = useRef(null);
+  const appliedFocusIdRef = useRef(null);
 
   const models = useMemo(() => getModelsData(data, range), [data, range]);
   useEffect(() => {
@@ -160,6 +167,20 @@ export default function Models({ data, range = 'total', chartMode = 'default' })
       setExpanded(null);
     }
   }, [expanded, models]);
+
+  useEffect(() => {
+    if (!focusRequest) {
+      appliedFocusIdRef.current = null;
+      return;
+    }
+    const { id, modelName } = focusRequest;
+    if (!modelName || appliedFocusIdRef.current === id) return;
+    const match = models.find((m) => m.model_name === modelName);
+    appliedFocusIdRef.current = id;
+    if (match) setExpanded(match.model_name);
+    onFocusRequestConsumed?.();
+  }, [focusRequest, models, onFocusRequestConsumed]);
+
   if (!models?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
   const reversed = [...models].reverse();
   const maxTokens = Math.max(...models.map((model) => model.tokens || 0), 0);

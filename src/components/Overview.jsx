@@ -96,7 +96,7 @@ function buildSingleDonutLabelLayout(activeRows) {
   };
 }
 
-function DailySpark({ daily, exportMode = false }) {
+function DailySpark({ daily, exportMode = false, exportPlayback = false, onDayClick }) {
   if (!daily?.dates?.length) {
     return (
       <div className="overview-daily-spark overview-daily-spark-empty">
@@ -143,10 +143,22 @@ function DailySpark({ daily, exportMode = false }) {
     })),
   };
 
+  const sparkEvents = onDayClick && !exportMode && !exportPlayback
+    ? {
+        click: (params) => {
+          const date = params?.axisValue || params?.name;
+          if (date) onDayClick(date);
+        },
+      }
+    : undefined;
+
   return (
     <div className="overview-daily-spark">
       <span className="overview-daily-spark-title">Daily Usage</span>
-      <div className="overview-daily-spark-chart">
+      <div
+        className="overview-daily-spark-chart"
+        style={sparkEvents ? { cursor: 'pointer' } : undefined}
+      >
         <ReactEChartsCore
           echarts={echarts}
           option={option}
@@ -154,6 +166,7 @@ function DailySpark({ daily, exportMode = false }) {
           theme="dark"
           lazyUpdate={false}
           notMerge={exportMode}
+          onEvents={sparkEvents}
         />
       </div>
     </div>
@@ -169,7 +182,7 @@ const HEATMAP_METRICS = [
 const HEATMAP_POP_DURATION_MS = OVERVIEW_INGEST_ANIMATION.heatmap?.popDurationMs ?? 380;
 const HEATMAP_SETTLE_THRESHOLD = OVERVIEW_INGEST_ANIMATION.heatmap?.settleThreshold ?? 0.998;
 
-function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
+function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0, onDayClick, interactive = true }) {
   const [metric, setMetric] = useState('tokens');
   const [changedKeysUp, setChangedKeysUp] = useState(new Set());
   const [changedKeysDown, setChangedKeysDown] = useState(new Set());
@@ -277,8 +290,20 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0 }) {
           c ? (
             <div
               key={c.key}
+              role={onDayClick && interactive ? 'button' : undefined}
+              tabIndex={onDayClick && interactive ? 0 : undefined}
+              onClick={onDayClick && interactive ? () => onDayClick(c.key) : undefined}
+              onKeyDown={onDayClick && interactive ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onDayClick(c.key);
+                }
+              } : undefined}
               className={`heatmap-cell ${c.val > 0 ? 'active' : ''} ${changedKeysUp.has(c.key) ? 'heatmap-cell-pop' : ''} ${changedKeysDown.has(c.key) ? 'heatmap-cell-pop-dim' : ''}`}
-              style={{ background: intensity(c.val) }}
+              style={{
+                background: intensity(c.val),
+                cursor: onDayClick && interactive ? 'pointer' : undefined,
+              }}
               title={`${c.key}: ${HEATMAP_METRICS.find(m => m.key === metric).fmt(c.val)}`}
             />
           ) : <div key={`pad-${i}`} className="heatmap-cell" style={{ visibility: 'hidden' }} />
@@ -299,6 +324,9 @@ export function OverviewFrame({
   exportMode = false,
   exportPlayback = false,
   exportPhase = null,
+  onNavigateToDailyDay,
+  onNavigateToRepo,
+  onNavigateToModel,
 }) {
   if (!presentation?.ready) return null;
   const chartPresentation = exportPlayback && exportPhase === 'replay' && rawPresentation?.ready
@@ -325,6 +353,8 @@ export function OverviewFrame({
       ?? OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs
       ?? 240)
     : (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs ?? 30);
+
+  const chartInteractive = !exportMode && !exportPlayback;
 
   const repoOption = {
     backgroundColor: 'transparent',
@@ -378,6 +408,16 @@ export function OverviewFrame({
       barWidth: '80%',
     }],
   };
+
+  const repoChartEvents = chartInteractive && onNavigateToRepo
+    ? {
+        click: (params) => {
+          if (params?.componentType !== 'series' || params?.dataIndex == null) return;
+          const row = reversedRepos[params.dataIndex];
+          if (row?.label) onNavigateToRepo(row.label);
+        },
+      }
+    : undefined;
 
   const familyTotal = orderedFamilies.reduce((sum, row) => sum + (row.tokens || 0), 0);
   const visibleFamilyRows = orderedFamilies.filter((row) => (familyTotal > 0 ? ((row.tokens || 0) / familyTotal) >= 0.01 : false));
@@ -459,6 +499,17 @@ export function OverviewFrame({
     }],
   };
 
+  const modelChartEvents = chartInteractive && onNavigateToModel
+    ? {
+        click: (params) => {
+          if (params?.componentType !== 'series' || params?.dataIndex == null) return;
+          const row = visibleModelRows[params.dataIndex];
+          const name = row?.label || params?.name;
+          if (name) onNavigateToModel(name);
+        },
+      }
+    : undefined;
+
   return (
     <div className="animate-in">
       <div className="stat-row">
@@ -484,16 +535,35 @@ export function OverviewFrame({
             <div className="stat-per-day"><span className="stat-per-day-value">{(stats.sessions / stats.days).toFixed(1)}</span> per day</div>
           </div>
         </div>
-        <DailySpark daily={presentation.daily} exportMode={exportMode} />
+        <DailySpark
+          daily={presentation.daily}
+          exportMode={exportMode}
+          exportPlayback={exportPlayback}
+          onDayClick={chartInteractive ? onNavigateToDailyDay : undefined}
+        />
       </div>
 
-      <Heatmap heatmapData={heatmapPresentation} isIngestActive={isIngestActive} ingestProgress={ingestProgress} />
+      <Heatmap
+        heatmapData={heatmapPresentation}
+        isIngestActive={isIngestActive}
+        ingestProgress={ingestProgress}
+        onDayClick={chartInteractive ? onNavigateToDailyDay : undefined}
+        interactive={chartInteractive}
+      />
 
       <div className="grid-3">
         <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Top Repos</div>
           {topRepos.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={repoOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode} />
+            <ReactEChartsCore
+              echarts={echarts}
+              option={repoOption}
+              style={{ height: 180, cursor: repoChartEvents ? 'pointer' : undefined }}
+              theme="dark"
+              lazyUpdate={false}
+              notMerge={exportMode}
+              onEvents={repoChartEvents}
+            />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -509,7 +579,15 @@ export function OverviewFrame({
         <div className="chart-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Models</div>
           {topModels.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={modelOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={true} />
+            <ReactEChartsCore
+              echarts={echarts}
+              option={modelOption}
+              style={{ height: 180, cursor: modelChartEvents ? 'pointer' : undefined }}
+              theme="dark"
+              lazyUpdate={false}
+              notMerge={true}
+              onEvents={modelChartEvents}
+            />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -550,6 +628,9 @@ function Overview({
   ingestProgress = 0,
   isIngestActive = false,
   clockNowMs = null,
+  onNavigateToDailyDay,
+  onNavigateToRepo,
+  onNavigateToModel,
 }) {
   const presentation = useAnimatedOverviewPresentation(
     { overview: data, heatmap, daily, families, repos, models, range },
@@ -572,6 +653,9 @@ function Overview({
       rawPresentation={rawPresentation}
       ingestProgress={ingestProgress}
       isIngestActive={isIngestActive}
+      onNavigateToDailyDay={onNavigateToDailyDay}
+      onNavigateToRepo={onNavigateToRepo}
+      onNavigateToModel={onNavigateToModel}
     />
   );
 }
@@ -587,7 +671,10 @@ function areOverviewPropsEqual(prev, next) {
     && prev.onPresentationSettledChange === next.onPresentationSettledChange
     && prev.ingestProgress === next.ingestProgress
     && prev.isIngestActive === next.isIngestActive
-    && prev.clockNowMs === next.clockNowMs;
+    && prev.clockNowMs === next.clockNowMs
+    && prev.onNavigateToDailyDay === next.onNavigateToDailyDay
+    && prev.onNavigateToRepo === next.onNavigateToRepo
+    && prev.onNavigateToModel === next.onNavigateToModel;
 }
 
 export default memo(Overview, areOverviewPropsEqual);
