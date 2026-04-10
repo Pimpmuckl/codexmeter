@@ -35,7 +35,7 @@ export function readThreads(codexHome, onProgress) {
         rollout_path: row.rollout_path,
         created_at: row.created_at,
         updated_at: row.updated_at,
-        source: row.source,
+        source_raw: row.source,
         model_provider: row.model_provider,
         cwd_raw: row.cwd,
         title: row.title ? row.title.slice(0, 200) : '',

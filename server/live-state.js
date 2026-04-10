@@ -242,8 +242,7 @@ function applyDailyBucket(dayMap, session, toDayKey, dirtySet) {
 
   if (session.active_by_day) {
     for (const [dayKey, seconds] of Object.entries(session.active_by_day)) {
-      const day = ensureDay(dayMap, dayKey);
-      day.elapsed_seconds += seconds || 0;
+      addElapsedToDay(dayMap, dayKey, session, seconds || 0);
       dirtySet.add(dayKey);
     }
   }
@@ -307,6 +306,14 @@ function addSessionPresence(dayMap, startDay, endDay, startMs, endMs, totalDur, 
 function addPresenceToDay(dayMap, dayKey, session, fraction) {
   const day = ensureDay(dayMap, dayKey);
   if (fraction > 0.001) day.sessions += 1;
+
+  const familyKey = session.agent_family || 'generic';
+  if (!day.by_family[familyKey]) day.by_family[familyKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  if (fraction > 0.001) day.by_family[familyKey].sessions += 1;
+
+  const repoKey = session.repo_label || 'unknown';
+  if (!day.by_repo[repoKey]) day.by_repo[repoKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  if (fraction > 0.001) day.by_repo[repoKey].sessions += 1;
 }
 
 function addUsageByDay(dayMap, session, dirtySet) {
@@ -320,6 +327,16 @@ function addUsageByDay(dayMap, session, dirtySet) {
     if (!day.by_model[modelKey]) day.by_model[modelKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
     day.by_model[modelKey].tokens += usageDay.tokens || 0;
     if (usageDay.cost !== null) day.by_model[modelKey].cost += usageDay.cost;
+
+    const familyKey = session.agent_family || 'generic';
+    if (!day.by_family[familyKey]) day.by_family[familyKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+    day.by_family[familyKey].tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) day.by_family[familyKey].cost += usageDay.cost;
+
+    const repoKey = session.repo_label || 'unknown';
+    if (!day.by_repo[repoKey]) day.by_repo[repoKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+    day.by_repo[repoKey].tokens += usageDay.tokens || 0;
+    if (usageDay.cost !== null) day.by_repo[repoKey].cost += usageDay.cost;
     dirtySet.add(dayKey);
   }
 }
@@ -334,13 +351,43 @@ function addToDay(dayMap, dayKey, session, fraction) {
   if (!day.by_model[modelKey]) day.by_model[modelKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
   day.by_model[modelKey].tokens += (session.tokens_used || 0) * fraction;
   if (session.cost !== null) day.by_model[modelKey].cost += session.cost * fraction;
+
+  const familyKey = session.agent_family || 'generic';
+  if (!day.by_family[familyKey]) day.by_family[familyKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  day.by_family[familyKey].tokens += (session.tokens_used || 0) * fraction;
+  if (session.cost !== null) day.by_family[familyKey].cost += session.cost * fraction;
+  if (fraction > 0.001) day.by_family[familyKey].sessions += 1;
+
+  const repoKey = session.repo_label || 'unknown';
+  if (!day.by_repo[repoKey]) day.by_repo[repoKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  day.by_repo[repoKey].tokens += (session.tokens_used || 0) * fraction;
+  if (session.cost !== null) day.by_repo[repoKey].cost += session.cost * fraction;
+  if (fraction > 0.001) day.by_repo[repoKey].sessions += 1;
 }
 
 function ensureDay(dayMap, dayKey) {
   if (!dayMap.has(dayKey)) {
-    dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {} });
+    dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
   }
   return dayMap.get(dayKey);
+}
+
+function addElapsedToDay(dayMap, dayKey, session, seconds) {
+  if (!seconds) return;
+  const day = ensureDay(dayMap, dayKey);
+  day.elapsed_seconds += seconds;
+
+  const modelKey = session.model_name || 'unknown';
+  if (!day.by_model[modelKey]) day.by_model[modelKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
+  day.by_model[modelKey].elapsed_seconds += seconds;
+
+  const familyKey = session.agent_family || 'generic';
+  if (!day.by_family[familyKey]) day.by_family[familyKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  day.by_family[familyKey].elapsed_seconds += seconds;
+
+  const repoKey = session.repo_label || 'unknown';
+  if (!day.by_repo[repoKey]) day.by_repo[repoKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  day.by_repo[repoKey].elapsed_seconds += seconds;
 }
 
 function ensureHeatmapDay(dayMap, dayKey) {
@@ -424,6 +471,8 @@ function serializeDailyEntry(value) {
     elapsed_seconds: Math.round(value?.elapsed_seconds || 0),
     sessions: value?.sessions || 0,
     by_model: deepRoundClone(value?.by_model || {}, ['tokens', 'cost', 'elapsed_seconds']),
+    by_family: deepRoundClone(value?.by_family || {}, ['tokens', 'cost', 'elapsed_seconds', 'sessions']),
+    by_repo: deepRoundClone(value?.by_repo || {}, ['tokens', 'cost', 'elapsed_seconds', 'sessions']),
     approximate: true,
   };
 }

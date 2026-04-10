@@ -2,7 +2,7 @@ import { readThreads } from './sqlite-reader.js';
 import { randomUUID } from 'crypto';
 import {
   normalizeCwd, deriveRepoKey, deriveRepoLabel,
-  classifyAgentFamily, isSubagent, normalizeModelName,
+  classifyAgentFamily, deriveAgentRole, isReviewLauncherSession, isSubagent, normalizeModelName,
 } from './normalize.js';
 import { calculateCostFromUsage, initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
@@ -99,9 +99,11 @@ export async function runIngest(codexHome, state, opts = {}) {
     const sessions = [];
     for (const t of threads) {
       const nc = normalizeCwd(t.cwd_raw);
+      const agentRole = deriveAgentRole(t.agent_role, t.source_raw, t.title);
       sessions.push({
         thread_id: t.thread_id,
         rollout_path: t.rollout_path,
+        source_raw: t.source_raw,
         cwd_raw: t.cwd_raw,
         repo_key: deriveRepoKey(nc),
         repo_label: deriveRepoLabel(nc),
@@ -117,10 +119,10 @@ export async function runIngest(codexHome, state, opts = {}) {
         has_usage_by_day: false,
         live_sort_ts: null,
         active_by_day: null,
-        agent_role: t.agent_role,
+        agent_role: agentRole,
         agent_nickname: t.agent_nickname,
-        agent_family: classifyAgentFamily(t.agent_role),
-        is_subagent: isSubagent(t.agent_role),
+        agent_family: classifyAgentFamily(agentRole),
+        is_subagent: isSubagent(agentRole),
         parent_thread_id: null,
         cost: null,
         cost_source: 'unavailable',
@@ -133,9 +135,10 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.phase = 'enrichment';
     queueLiveProgress(state);
 
-    const bootstrapSessions = sessions.filter((session) => !session.rollout_path);
-    if (bootstrapSessions.length) {
+    const bootstrapCandidates = sessions.filter((session) => !session.rollout_path);
+    if (bootstrapCandidates.length) {
       assignRootThreadIds(sessions);
+      const bootstrapSessions = filterVisibleSessions(bootstrapCandidates);
       const bootstrapPatch = createEmptyLivePatch();
       for (const session of bootstrapSessions) {
         finalizeSessionMetrics(session, toDayKey);
@@ -144,9 +147,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       queueLivePatch(state, bootstrapPatch);
     }
 
-    const candidates = sessions
-      .filter(s => s.rollout_path)
-      .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
+    const candidates = selectEnrichmentCandidates(sessions);
 
     state.needs_enrichment = candidates.length;
     state.percent = candidates.length > 0 ? 0.08 : 0.90;
@@ -204,13 +205,12 @@ export async function runIngest(codexHome, state, opts = {}) {
         lastRootRefreshCount = state.enriched;
       }
       const liveReady = bufferLiveSessionsForPresentation(state, batch);
-      if (state.live_session_buffer[0]?.live_sort_day) {
-        state.current_date_bucket = state.live_session_buffer[0].live_sort_day;
-      } else if (liveReady[0]?.live_sort_day) {
-        state.current_date_bucket = liveReady[0].live_sort_day;
-      }
+      state.current_date_bucket = pickVisibleDateBucket(
+        filterVisibleSessions(state.live_session_buffer),
+        filterVisibleSessions(liveReady)
+      );
       const livePatch = createEmptyLivePatch();
-      for (const session of liveReady) {
+      for (const session of filterVisibleSessions(liveReady)) {
         applySessionToLiveState(state.live_state, session, livePatch);
       }
       queueLivePatch(state, livePatch);
@@ -230,7 +230,7 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     assignRootThreadIds(sessions);
     const finalLivePatch = createEmptyLivePatch();
-    for (const session of flushBufferedLiveSessions(state)) {
+    for (const session of filterVisibleSessions(flushBufferedLiveSessions(state))) {
       applySessionToLiveState(state.live_state, session, finalLivePatch);
     }
     queueLivePatch(state, finalLivePatch);
@@ -296,11 +296,26 @@ export function restartIngest(codexHome, state, opts = {}) {
 
 function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
   const source = mode.partial ? sessions.filter(session => session.materialized) : sessions;
-  const filtered = applyFilters(source, opts);
+  const visibleSource = filterVisibleSessions(source);
+  const filtered = applyFilters(visibleSource, opts);
   const sessionView = buildSessionView(filtered, source);
   state.sessions = sessionView;
   state.aggregates = buildAggregates(filtered, tz, sessionView);
   state.generated_at = new Date().toISOString();
+}
+
+export function filterVisibleSessions(sessions) {
+  return sessions.filter((session) => !isReviewLauncherSession(session));
+}
+
+export function selectEnrichmentCandidates(sessions) {
+  return sessions
+    .filter((session) => session.rollout_path)
+    .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
+}
+
+export function pickVisibleDateBucket(bufferedSessions, liveReadySessions) {
+  return bufferedSessions[0]?.live_sort_day || liveReadySessions[0]?.live_sort_day || null;
 }
 
 function applyFilters(sessions, opts) {
@@ -325,7 +340,7 @@ function applyFilters(sessions, opts) {
   return result;
 }
 
-function assignRootThreadIds(sessions) {
+export function assignRootThreadIds(sessions, toDayKey = createDayKeyFormatter(Intl.DateTimeFormat().resolvedOptions().timeZone)) {
   const byId = new Map(sessions.map(session => [session.thread_id, session]));
   const memo = new Map();
 
@@ -336,37 +351,63 @@ function assignRootThreadIds(sessions) {
     const trail = [];
     const seen = new Set();
     let current = session;
-    let rootId = session.thread_id;
+    let root = {
+      id: session.thread_id,
+      dayKey: session.started_at ? toDayKey(session.started_at * 1000) : null,
+    };
 
     while (current) {
       trail.push(current.thread_id);
       const parentId = current.parent_thread_id;
 
       if (!parentId || parentId === current.thread_id || seen.has(parentId)) {
-        rootId = current.thread_id;
+        root = {
+          id: current.thread_id,
+          dayKey: current.started_at ? toDayKey(current.started_at * 1000) : null,
+        };
         break;
       }
 
       if (memo.has(parentId)) {
-        rootId = memo.get(parentId);
+        const parentRoot = memo.get(parentId);
+        const currentDayKey = current.started_at ? toDayKey(current.started_at * 1000) : null;
+        root = parentRoot?.dayKey && currentDayKey === parentRoot.dayKey
+          ? parentRoot
+          : {
+              id: current.thread_id,
+              dayKey: currentDayKey,
+            };
         break;
       }
 
       seen.add(parentId);
       const parent = byId.get(parentId);
       if (!parent) {
-        rootId = parentId;
+        root = {
+          id: parentId,
+          dayKey: current.started_at ? toDayKey(current.started_at * 1000) : null,
+        };
+        break;
+      }
+
+      const parentDayKey = parent.started_at ? toDayKey(parent.started_at * 1000) : null;
+      const currentDayKey = current.started_at ? toDayKey(current.started_at * 1000) : null;
+      if (currentDayKey && parentDayKey && currentDayKey !== parentDayKey) {
+        root = {
+          id: current.thread_id,
+          dayKey: currentDayKey,
+        };
         break;
       }
       current = parent;
     }
 
-    for (const threadId of trail) memo.set(threadId, rootId);
-    return rootId;
+    for (const threadId of trail) memo.set(threadId, root);
+    return root;
   };
 
   for (const session of sessions) {
-    session.root_thread_id = resolveRoot(session) || session.thread_id;
+    session.root_thread_id = resolveRoot(session)?.id || session.thread_id;
   }
 }
 
@@ -706,5 +747,3 @@ function broadcastBootstrap(state) {
   };
   broadcastLive(state, 'bootstrap', payload);
 }
-
-

@@ -262,11 +262,10 @@ function buildDaily(rawSessions, groupedSessions, tz) {
     }
   }
 
-  for (const s of groupedSessions) {
+  for (const s of rawSessions) {
     if (!s.active_by_day) continue;
     for (const [dayKey, seconds] of Object.entries(s.active_by_day)) {
-      if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {} });
-      dayMap.get(dayKey).elapsed_seconds += seconds;
+      addElapsedToDay(dayMap, dayKey, s, seconds || 0);
     }
   }
 
@@ -282,10 +281,10 @@ function buildDaily(rawSessions, groupedSessions, tz) {
         Object.entries(d.by_model).map(([k, v]) => [k, { tokens: Math.round(v.tokens), cost: v.cost, elapsed_seconds: Math.round(v.elapsed_seconds) }])
       ),
       by_family: Object.fromEntries(
-        Object.entries(d.by_family).map(([k, v]) => [k, { tokens: Math.round(v.tokens), cost: v.cost, sessions: v.sessions }])
+        Object.entries(d.by_family).map(([k, v]) => [k, { tokens: Math.round(v.tokens), cost: v.cost, elapsed_seconds: Math.round(v.elapsed_seconds), sessions: v.sessions }])
       ),
       by_repo: Object.fromEntries(
-        Object.entries(d.by_repo || {}).map(([k, v]) => [k, { tokens: Math.round(v.tokens), cost: v.cost, sessions: v.sessions }])
+        Object.entries(d.by_repo || {}).map(([k, v]) => [k, { tokens: Math.round(v.tokens), cost: v.cost, elapsed_seconds: Math.round(v.elapsed_seconds), sessions: v.sessions }])
       ),
       approximate: true,
     }));
@@ -304,13 +303,13 @@ function addToDay(dayMap, dayKey, session, fraction) {
   if (session.cost !== null) d.by_model[mKey].cost += session.cost * fraction;
 
   const fKey = session.agent_family;
-  if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0 };
+  if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
   d.by_family[fKey].tokens += session.tokens_used * fraction;
   if (session.cost !== null) d.by_family[fKey].cost += session.cost * fraction;
   if (fraction > 0.001) d.by_family[fKey].sessions++;
 
   const rKey = session.repo_label || 'unknown';
-  if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, sessions: 0 };
+  if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
   d.by_repo[rKey].tokens += session.tokens_used * fraction;
   if (session.cost !== null) d.by_repo[rKey].cost += session.cost * fraction;
   if (fraction > 0.001) d.by_repo[rKey].sessions++;
@@ -375,11 +374,11 @@ function addPresenceToDay(dayMap, dayKey, session, fraction) {
   if (fraction > 0.001) d.sessions++;
 
   const fKey = session.agent_family;
-  if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0 };
+  if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
   if (fraction > 0.001) d.by_family[fKey].sessions++;
 
   const rKey = session.repo_label || 'unknown';
-  if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, sessions: 0 };
+  if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
   if (fraction > 0.001) d.by_repo[rKey].sessions++;
 }
 
@@ -397,15 +396,34 @@ function addUsageByDay(dayMap, session) {
     if (usageDay.cost !== null) d.by_model[mKey].cost += usageDay.cost;
 
     const fKey = session.agent_family;
-    if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0 };
+    if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
     d.by_family[fKey].tokens += usageDay.tokens || 0;
     if (usageDay.cost !== null) d.by_family[fKey].cost += usageDay.cost;
 
     const rKey = session.repo_label || 'unknown';
-    if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, sessions: 0 };
+    if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
     d.by_repo[rKey].tokens += usageDay.tokens || 0;
     if (usageDay.cost !== null) d.by_repo[rKey].cost += usageDay.cost;
   }
+}
+
+function addElapsedToDay(dayMap, dayKey, session, seconds) {
+  if (!seconds) return;
+  if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
+  const d = dayMap.get(dayKey);
+  d.elapsed_seconds += seconds;
+
+  const mKey = session.model_name || 'unknown';
+  if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
+  d.by_model[mKey].elapsed_seconds += seconds;
+
+  const fKey = session.agent_family || 'generic';
+  if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  d.by_family[fKey].elapsed_seconds += seconds;
+
+  const rKey = session.repo_label || 'unknown';
+  if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
+  d.by_repo[rKey].elapsed_seconds += seconds;
 }
 
 function dayStartMs(dayKey) {
@@ -462,11 +480,11 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
     thread_id: root.thread_id,
     root_thread_id: rootThreadId,
     repo_label: repoLabels.size === 1 ? [...repoLabels][0] : (root.repo_label || 'mixed'),
-    model_name: root.model_name || pickSummaryValue(modelNames),
-    reasoning_effort: root.reasoning_effort || pickSummaryValue(efforts),
-    agent_role: root.agent_role,
-    agent_nickname: root.agent_nickname,
-    agent_family: root.agent_family,
+    model_name: summarizeGroupedValue(root.model_name, modelNames),
+    reasoning_effort: summarizeGroupedValue(root.reasoning_effort, efforts),
+    agent_role: summarizeGroupedValue(root.agent_role, agentRoles),
+    agent_nickname: summarizeGroupedValue(root.agent_nickname, agentNicknames),
+    agent_family: summarizeGroupedValue(root.agent_family, agentFamilySet),
     is_subagent: false,
     started_at: rootStartedAt,
     ended_at: rootEndedAt,
@@ -490,10 +508,10 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
   };
 }
 
-function pickSummaryValue(values) {
-  if (values.size === 0) return null;
+function summarizeGroupedValue(rootValue, values) {
+  if (values.size === 0) return rootValue || null;
   if (values.size === 1) return [...values][0];
-  return `${[...values][0]} +${values.size - 1}`;
+  return 'mixed';
 }
 
 function mergeActiveByDay(target, source) {

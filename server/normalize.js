@@ -60,14 +60,76 @@ export function isSubagent(agentRole) {
   return agentRole != null && agentRole !== 'default';
 }
 
+export function parseThreadSource(rawSource) {
+  if (!rawSource) return null;
+  if (typeof rawSource === 'object') return rawSource;
+  const text = String(rawSource).trim();
+  if (!text) return null;
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { kind: text };
+    }
+  }
+  return { kind: text };
+}
+
+export function deriveAgentRole(agentRole, rawSource, title = null) {
+  if (agentRole && agentRole !== 'default') return agentRole;
+  const source = parseThreadSource(rawSource);
+  if (source && typeof source === 'object' && typeof source.subagent === 'string') {
+    return source.subagent;
+  }
+  if (isReviewTaskTitle(title)) return 'review';
+  return null;
+}
+
+export function isReviewTaskTitle(title) {
+  if (typeof title !== 'string') return false;
+  const value = title.trim().toLowerCase();
+  return (
+    value.startsWith('review the code changes against the base branch ') ||
+    value.startsWith('you are reviewing a manually supplied diff artifact.') ||
+    value.startsWith('brief review for commit range ') ||
+    value.startsWith('independent brief review ') ||
+    value.startsWith('tight-scope integration review ') ||
+    value.startsWith('pr-scope review ') ||
+    value.startsWith('independent second-round pr review ') ||
+    value.startsWith('second independent pr-scope review ') ||
+    value.startsWith('implementation-review preflight ') ||
+    value.startsWith('implementation-review postflight ')
+  );
+}
+
+export function isReviewLauncherSession(session) {
+  if (session?.rollout_path && !session?.materialized) return false;
+  const source = parseThreadSource(session?.source_raw);
+  const sourceKind = source?.kind || (typeof source === 'string' ? source : null);
+  return isLauncherSourceKind(sourceKind) &&
+    isReviewTaskTitle(session?.title) &&
+    !session?.model_name &&
+    !session?.usage_total &&
+    !session?.has_usage_by_day &&
+    !session?.elapsed_seconds &&
+    !session?.active_by_day &&
+    !session?.tokens_used;
+}
+
+function isLauncherSourceKind(sourceKind) {
+  const normalized = String(sourceKind || '').trim().toLowerCase();
+  return normalized === 'exec' ||
+    normalized === 'cli' ||
+    normalized.endsWith('-cli') ||
+    normalized.endsWith('_cli');
+}
+
 const MODEL_ALIASES = {
   'codex-mini-latest': 'o4-mini',
   'gpt-5.2': 'gpt-5.2-codex',
   'gpt-5 mini': 'gpt-5-mini',
-  'gpt-5.4-mini': 'gpt-5-mini',
-  'gpt-5.4 mini': 'gpt-5-mini',
-  'gpt-5 nano': 'gpt-5.4-nano',
-  'gpt-5-nano': 'gpt-5.4-nano',
+  'gpt-5.4 mini': 'gpt-5.4-mini',
+  'gpt-5 nano': 'gpt-5-nano',
   'gpt-5.4 nano': 'gpt-5.4-nano',
 };
 
