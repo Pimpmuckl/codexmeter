@@ -95,7 +95,7 @@ export function isReviewTaskTitle(title) {
 export function isReviewLauncherSession(session) {
   const source = parseThreadSource(session?.source_raw);
   const sourceKind = source?.kind || (typeof source === 'string' ? source : null);
-  return sourceKind === 'exec' &&
+  return (sourceKind === 'exec' || sourceKind === 'cli') &&
     isReviewTaskTitle(session?.title) &&
     !session?.model_name &&
     !session?.usage_total &&

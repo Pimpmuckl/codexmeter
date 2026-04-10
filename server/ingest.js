@@ -208,11 +208,10 @@ export async function runIngest(codexHome, state, opts = {}) {
         lastRootRefreshCount = state.enriched;
       }
       const liveReady = bufferLiveSessionsForPresentation(state, batch);
-      if (state.live_session_buffer[0]?.live_sort_day) {
-        state.current_date_bucket = state.live_session_buffer[0].live_sort_day;
-      } else if (liveReady[0]?.live_sort_day) {
-        state.current_date_bucket = liveReady[0].live_sort_day;
-      }
+      state.current_date_bucket = pickVisibleDateBucket(
+        filterVisibleSessions(state.live_session_buffer),
+        filterVisibleSessions(liveReady)
+      );
       const livePatch = createEmptyLivePatch();
       for (const session of filterVisibleSessions(liveReady)) {
         applySessionToLiveState(state.live_state, session, livePatch);
@@ -311,6 +310,10 @@ function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
 
 export function filterVisibleSessions(sessions) {
   return sessions.filter((session) => !isReviewLauncherSession(session));
+}
+
+export function pickVisibleDateBucket(bufferedSessions, liveReadySessions) {
+  return bufferedSessions[0]?.live_sort_day || liveReadySessions[0]?.live_sort_day || null;
 }
 
 function applyFilters(sessions, opts) {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAggregates } from '../server/aggregator.js';
 import { classifyAgentFamily, deriveAgentRole, isReviewLauncherSession } from '../server/normalize.js';
-import { filterVisibleSessions } from '../server/ingest.js';
+import { filterVisibleSessions, pickVisibleDateBucket } from '../server/ingest.js';
 
 const REVIEW_TITLE = "Review the code changes against the base branch 'main'.";
 
@@ -18,9 +18,17 @@ test('review task title falls back to review family when source is plain cli', (
   assert.equal(classifyAgentFamily(agentRole), 'review');
 });
 
-test('review exec launcher sessions are suppressed while real review sessions remain', () => {
+test('review exec and cli launcher sessions are suppressed while real review sessions remain', () => {
   const launcher = {
     source_raw: 'exec',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    tokens_used: 0,
+  };
+  const cliLauncher = {
+    source_raw: 'cli',
     title: REVIEW_TITLE,
     model_name: null,
     usage_total: null,
@@ -37,6 +45,7 @@ test('review exec launcher sessions are suppressed while real review sessions re
   };
 
   assert.equal(isReviewLauncherSession(launcher), true);
+  assert.equal(isReviewLauncherSession(cliLauncher), true);
   assert.equal(isReviewLauncherSession(realReview), false);
 });
 
@@ -132,4 +141,16 @@ test('review launcher stubs are excluded from bootstrap/live-visible sessions', 
   const visible = filterVisibleSessions([launcher, realReview]);
 
   assert.deepEqual(visible.map((session) => session.thread_id), ['review-child']);
+});
+
+test('progress bucket ignores hidden launcher rows', () => {
+  const hiddenBuffered = { thread_id: 'launcher', live_sort_day: '2026-04-09' };
+  const visibleReady = { thread_id: 'review-child', live_sort_day: '2026-04-10' };
+
+  const bucket = pickVisibleDateBucket(
+    filterVisibleSessions([{ ...hiddenBuffered, source_raw: 'cli', title: REVIEW_TITLE, model_name: null, usage_total: null, has_usage_by_day: false, tokens_used: 0 }]),
+    filterVisibleSessions([{ ...visibleReady, source_raw: '{"subagent":"review"}', title: REVIEW_TITLE, model_name: 'gpt-5.4', usage_total: { total_tokens: 1000 }, has_usage_by_day: true, tokens_used: 1000 }])
+  );
+
+  assert.equal(bucket, '2026-04-10');
 });
