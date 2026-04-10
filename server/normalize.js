@@ -60,6 +60,46 @@ export function isSubagent(agentRole) {
   return agentRole != null && agentRole !== 'default';
 }
 
+export function parseThreadSource(rawSource) {
+  if (!rawSource) return null;
+  if (typeof rawSource === 'object') return rawSource;
+  const text = String(rawSource).trim();
+  if (!text) return null;
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { kind: text };
+    }
+  }
+  return { kind: text };
+}
+
+export function deriveAgentRole(agentRole, rawSource, title = null) {
+  if (agentRole) return agentRole;
+  const source = parseThreadSource(rawSource);
+  if (source && typeof source === 'object' && typeof source.subagent === 'string') {
+    return source.subagent;
+  }
+  if (isReviewTaskTitle(title)) return 'review';
+  return null;
+}
+
+export function isReviewTaskTitle(title) {
+  return typeof title === 'string' && title.startsWith('Review the code changes against the base branch ');
+}
+
+export function isReviewLauncherSession(session) {
+  const source = parseThreadSource(session?.source_raw);
+  const sourceKind = source?.kind || (typeof source === 'string' ? source : null);
+  return sourceKind === 'exec' &&
+    isReviewTaskTitle(session?.title) &&
+    !session?.model_name &&
+    !session?.usage_total &&
+    !session?.has_usage_by_day &&
+    !session?.tokens_used;
+}
+
 const MODEL_ALIASES = {
   'codex-mini-latest': 'o4-mini',
   'gpt-5.2': 'gpt-5.2-codex',

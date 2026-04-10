@@ -2,7 +2,7 @@ import { readThreads } from './sqlite-reader.js';
 import { randomUUID } from 'crypto';
 import {
   normalizeCwd, deriveRepoKey, deriveRepoLabel,
-  classifyAgentFamily, isSubagent, normalizeModelName,
+  classifyAgentFamily, deriveAgentRole, isReviewLauncherSession, isSubagent, normalizeModelName,
 } from './normalize.js';
 import { calculateCostFromUsage, initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
@@ -99,9 +99,11 @@ export async function runIngest(codexHome, state, opts = {}) {
     const sessions = [];
     for (const t of threads) {
       const nc = normalizeCwd(t.cwd_raw);
+      const agentRole = deriveAgentRole(t.agent_role, t.source_raw, t.title);
       sessions.push({
         thread_id: t.thread_id,
         rollout_path: t.rollout_path,
+        source_raw: t.source_raw,
         cwd_raw: t.cwd_raw,
         repo_key: deriveRepoKey(nc),
         repo_label: deriveRepoLabel(nc),
@@ -117,10 +119,10 @@ export async function runIngest(codexHome, state, opts = {}) {
         has_usage_by_day: false,
         live_sort_ts: null,
         active_by_day: null,
-        agent_role: t.agent_role,
+        agent_role: agentRole,
         agent_nickname: t.agent_nickname,
-        agent_family: classifyAgentFamily(t.agent_role),
-        is_subagent: isSubagent(t.agent_role),
+        agent_family: classifyAgentFamily(agentRole),
+        is_subagent: isSubagent(agentRole),
         parent_thread_id: null,
         cost: null,
         cost_source: 'unavailable',
@@ -210,7 +212,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         state.current_date_bucket = liveReady[0].live_sort_day;
       }
       const livePatch = createEmptyLivePatch();
-      for (const session of liveReady) {
+      for (const session of liveReady.filter((candidate) => !isReviewLauncherSession(candidate))) {
         applySessionToLiveState(state.live_state, session, livePatch);
       }
       queueLivePatch(state, livePatch);
@@ -230,7 +232,7 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     assignRootThreadIds(sessions);
     const finalLivePatch = createEmptyLivePatch();
-    for (const session of flushBufferedLiveSessions(state)) {
+    for (const session of flushBufferedLiveSessions(state).filter((candidate) => !isReviewLauncherSession(candidate))) {
       applySessionToLiveState(state.live_state, session, finalLivePatch);
     }
     queueLivePatch(state, finalLivePatch);
@@ -295,7 +297,8 @@ export function restartIngest(codexHome, state, opts = {}) {
 }
 
 function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
-  const source = mode.partial ? sessions.filter(session => session.materialized) : sessions;
+  const source = (mode.partial ? sessions.filter(session => session.materialized) : sessions)
+    .filter(session => !isReviewLauncherSession(session));
   const filtered = applyFilters(source, opts);
   const sessionView = buildSessionView(filtered, source);
   state.sessions = sessionView;
@@ -706,5 +709,3 @@ function broadcastBootstrap(state) {
   };
   broadcastLive(state, 'bootstrap', payload);
 }
-
-
