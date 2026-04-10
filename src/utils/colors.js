@@ -18,6 +18,8 @@ const REPO_PALETTE = [
 const MODEL_COLORS = {
   'gpt-5.4':              '#f472b6',
   'gpt-5-mini':           '#fb7185',
+  'gpt-5.4-mini':         '#fb7185',
+  'gpt-5-nano':           '#fda4af',
   'gpt-5.4-nano':         '#fda4af',
   'gpt-5.3-codex':        '#f59e0b',
   'gpt-5.3-codex-spark':  '#fbbf24',
