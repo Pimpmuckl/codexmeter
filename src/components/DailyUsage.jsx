@@ -6,7 +6,8 @@ import { GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZ
 import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor, getFamilyColor, getRepoColor, getContrastLabelColor } from '../utils/colors';
 import { formatCompactNumber } from '../utils/formatters';
-import { ECHARTS_ANIMATION, ECHARTS_LABEL_ANIMATION } from '../utils/animationsDefault';
+import { ECHARTS_ANIMATION, ECHARTS_OVERVIEW_DAILY } from '../utils/animationsDefault';
+import { useDailyStackPresentationTween } from '../hooks/useDailyStackPresentationTween';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, GraphicComponent, CanvasRenderer]);
@@ -48,6 +49,57 @@ function getZoomWindow(range, count) {
   return {
     startValue: count - visibleDays,
     endValue: count - 1,
+  };
+}
+
+const DAILY_ZOOM_ANIM_MS = 280;
+
+function parseDataZoomToWindow(params, dates, fallback) {
+  const dz = params?.batch?.[0] ?? params;
+  const hi = Math.max(0, dates.length - 1);
+  let s;
+  let e;
+  if (dz && typeof dz.startValue === 'number' && typeof dz.endValue === 'number') {
+    s = dz.startValue;
+    e = dz.endValue;
+  } else if (dz && typeof dz.start === 'number' && typeof dz.end === 'number' && dates.length) {
+    s = Math.round((dz.start / 100) * hi);
+    e = Math.round((dz.end / 100) * hi);
+  } else if (dz && typeof dz.startValue === 'string' && typeof dz.endValue === 'string' && dates.length) {
+    s = dates.indexOf(dz.startValue);
+    e = dates.indexOf(dz.endValue);
+    if (s < 0) s = fallback.startValue;
+    if (e < 0) e = fallback.endValue;
+  } else {
+    s = fallback.startValue;
+    e = fallback.endValue;
+  }
+  s = Math.max(0, Math.min(hi, Math.floor(s)));
+  e = Math.max(0, Math.min(hi, Math.floor(e)));
+  return s > e ? { startValue: e, endValue: s } : { startValue: s, endValue: e };
+}
+
+function startDataZoomLerp(from, to, setZoom, rafRef, ms) {
+  cancelAnimationFrame(rafRef.current);
+  rafRef.current = 0;
+  if (Math.round(from.startValue) === Math.round(to.startValue) && Math.round(from.endValue) === Math.round(to.endValue)) {
+    return undefined;
+  }
+  let t0 = 0;
+  const tick = (ts) => {
+    if (!t0) t0 = ts;
+    const u = Math.min(1, (ts - t0) / ms);
+    const w = 1 - (1 - u) ** 3;
+    setZoom({
+      startValue: Math.round(from.startValue + (to.startValue - from.startValue) * w),
+      endValue: Math.round(from.endValue + (to.endValue - from.endValue) * w),
+    });
+    rafRef.current = u < 1 ? requestAnimationFrame(tick) : 0;
+  };
+  rafRef.current = requestAnimationFrame(tick);
+  return () => {
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
   };
 }
 
@@ -185,13 +237,35 @@ const DailyMainChart = React.memo(function DailyMainChart({
 }) {
   const [zoomWindow, setZoomWindow] = useState({ startValue: 0, endValue: 0 });
   const chartRef = useRef(null);
+  const zoomWindowRef = useRef(zoomWindow);
+  zoomWindowRef.current = zoomWindow;
+  const zoomAnimRafRef = useRef(0);
+  const lastRangeForZoomRef = useRef(null);
+  const lastCountForZoomRef = useRef(0);
   const dates = daily.map((d) => d.date);
   const curMetric = METRICS.find((m) => m.key === metric);
   const targetZoomWindow = useMemo(() => getZoomWindow(range, dates.length), [range, dates.length]);
 
   useEffect(() => {
-    setZoomWindow(targetZoomWindow);
-  }, [targetZoomWindow]);
+    if (!dates.length) return undefined;
+    const target = getZoomWindow(range, dates.length);
+    const cold = lastRangeForZoomRef.current === null;
+    const rangeMoved = !cold && lastRangeForZoomRef.current !== range;
+    const countMoved = !cold && lastCountForZoomRef.current !== dates.length;
+    lastRangeForZoomRef.current = range;
+    lastCountForZoomRef.current = dates.length;
+    cancelAnimationFrame(zoomAnimRafRef.current);
+    zoomAnimRafRef.current = 0;
+    if (cold) {
+      setZoomWindow(target);
+      return undefined;
+    }
+    if (rangeMoved) {
+      return startDataZoomLerp(zoomWindowRef.current, target, setZoomWindow, zoomAnimRafRef, DAILY_ZOOM_ANIM_MS);
+    }
+    if (countMoved) setZoomWindow(target);
+    return undefined;
+  }, [range, dates.length]);
 
   const appliedNavigateIdRef = useRef(null);
   useEffect(() => {
@@ -211,6 +285,8 @@ const DailyMainChart = React.memo(function DailyMainChart({
     appliedNavigateIdRef.current = id;
     const startIdx = Math.max(0, idx - 3);
     const endIdx = Math.min(dateList.length - 1, idx + 3);
+    cancelAnimationFrame(zoomAnimRafRef.current);
+    zoomAnimRafRef.current = 0;
     setZoomWindow({ startValue: startIdx, endValue: endIdx });
     onSelectDate(centerDate);
     onNavigateToDayConsumed?.();
@@ -280,13 +356,37 @@ const DailyMainChart = React.memo(function DailyMainChart({
     }
     return maxVal;
   }, [dayTotals, visibleWindow]);
+
+  const isRelative = displayMode === 'relative';
+
+  const targetDaily = useMemo(() => ({
+    dates,
+    series: rawSeriesData.map((s) => ({ key: s.name, label: s.name, data: s.values })),
+  }), [dates, rawSeriesData]);
+
+  const presentationScaleKey = `${metric}\0${split}`;
+  const animatedDaily = useDailyStackPresentationTween(targetDaily, !isRelative, presentationScaleKey);
+
+  const animatedByKey = useMemo(
+    () => new Map((animatedDaily?.series || []).map((s) => [s.key, s])),
+    [animatedDaily],
+  );
+
+  const tooltipDayTotals = useMemo(() => {
+    if (isRelative) return dayTotals;
+    const n = dates.length;
+    const out = new Array(n).fill(0);
+    for (const s of animatedDaily?.series || []) {
+      for (let j = 0; j < n; j++) out[j] += s.data[j] || 0;
+    }
+    return out;
+  }, [isRelative, dayTotals, animatedDaily, dates.length]);
+
   const absoluteYAxisMax = useMemo(() => {
     if (displayMode === 'relative') return 100;
     if (!maxVisibleDayTotal) return undefined;
     return Math.ceil(maxVisibleDayTotal * 1.1);
   }, [displayMode, maxVisibleDayTotal]);
-
-  const isRelative = displayMode === 'relative';
   let cumulativeData = null;
   if (isRelative) {
     const allVals = rawSeriesData.map((s) => {
@@ -303,10 +403,12 @@ const DailyMainChart = React.memo(function DailyMainChart({
       return { values: vals, prevStack };
     });
   }
-  const series = rawSeriesData.map((s, seriesIdx) => {
-    const color = split === 'model' ? getModelColor(s.name) : getFamilyColor(s.name);
+  const series = groups.map((g, seriesIdx) => {
+    const color = split === 'model' ? getModelColor(g) : getFamilyColor(g);
     let data;
     if (isRelative) {
+      const s = rawSeriesData[seriesIdx];
+      if (!s) return null;
       const cd = cumulativeData[seriesIdx];
       data = cd.values;
       const labelColor = getContrastLabelColor(color);
@@ -321,7 +423,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
       const showLabel = maxVal >= 8;
       const centerY = showLabel ? cd.prevStack[labelIdx] + data[labelIdx] / 2 : 0;
       return {
-        name: s.name,
+        name: g,
         type: 'line',
         stack: 'total',
         smooth: 0.2,
@@ -332,9 +434,9 @@ const DailyMainChart = React.memo(function DailyMainChart({
         itemStyle: { color },
       };
     }
-    data = s.values;
+    data = animatedByKey.get(g)?.data ?? dates.map(() => 0);
     return {
-      name: s.name,
+      name: g,
       type: 'bar',
       stack: 'total',
       data,
@@ -343,7 +445,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
       barMaxWidth: visibleBarWidth,
       barMinWidth: Math.min(10, visibleBarWidth),
     };
-  });
+  }).filter(Boolean);
 
   const labelSpecs = useMemo(() => {
     if (!isRelative || !cumulativeData) return [];
@@ -409,17 +511,18 @@ const DailyMainChart = React.memo(function DailyMainChart({
       confine: true,
       formatter: (params) => {
         const dayIdx = params?.[0]?.dataIndex;
-        const total = dayIdx != null ? dayTotals[dayIdx] : 0;
+        const totalsForTip = tooltipDayTotals;
+        const total = dayIdx != null ? totalsForTip[dayIdx] : 0;
         let prevIdx = dayIdx;
         if (displayMode === 'relative' && total === 0 && dayIdx != null) {
           for (let k = dayIdx - 1; k >= 0; k--) {
-            if (dayTotals[k] > 0) {
+            if (totalsForTip[k] > 0) {
               prevIdx = k;
               break;
             }
           }
         }
-        const displayTotal = displayMode === 'relative' && total === 0 ? (dayTotals[prevIdx] ?? 0) : total;
+        const displayTotal = displayMode === 'relative' && total === 0 ? (totalsForTip[prevIdx] ?? 0) : total;
         let html = `<b>${params[0].axisValue}</b><br/>`;
         const sorted = [...params].filter((p) => p.value > 0).sort((a, b) => (b.value || 0) - (a.value || 0));
         for (const p of sorted) {
@@ -459,8 +562,9 @@ const DailyMainChart = React.memo(function DailyMainChart({
     },
     yAxis: {
       type: 'value',
-      min: displayMode === 'relative' ? 0 : undefined,
+      min: 0,
       max: displayMode === 'relative' ? 100 : absoluteYAxisMax,
+      scale: false,
       axisLabel: {
         formatter: displayMode === 'relative' ? (v) => v + '%' : (v) => curMetric.fn(v),
         color: '#484f58',
@@ -468,7 +572,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
       splitLine: { lineStyle: { color: '#21262d' } },
     },
     series,
-    ...ECHARTS_ANIMATION,
+    ...(isRelative ? ECHARTS_ANIMATION : ECHARTS_OVERVIEW_DAILY),
   };
 
   return (
@@ -482,22 +586,15 @@ const DailyMainChart = React.memo(function DailyMainChart({
         theme="dark"
         notMerge={false}
         replaceMerge={['series', 'legend', 'graphic']}
-        lazyUpdate={true}
+        lazyUpdate={isRelative}
         onChartReady={updateGraphicLabels}
         onEvents={{
           click: (params) => {
             const date = params?.axisValue || params?.name;
             if (date) onSelectDate(date);
           },
-          datazoom: () => {
-            const chart = chartRef.current?.getEchartsInstance();
-            const dz = chart?.getOption()?.dataZoom?.[0];
-            if (dz) {
-              setZoomWindow({
-                startValue: typeof dz.startValue === 'number' ? dz.startValue : targetZoomWindow.startValue,
-                endValue: typeof dz.endValue === 'number' ? dz.endValue : targetZoomWindow.endValue,
-              });
-            }
+          datazoom: (params) => {
+            setZoomWindow(parseDataZoomToWindow(params, dates, zoomWindowRef.current));
             requestAnimationFrame(() => updateGraphicLabels());
           },
         }}

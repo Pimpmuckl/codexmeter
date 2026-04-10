@@ -156,7 +156,7 @@ function interpolateMetricRows(fromRows, toRows, t) {
   return rows;
 }
 
-function interpolateDaily(fromDaily, toDaily, t) {
+export function interpolateDaily(fromDaily, toDaily, t) {
   const dates = (toDaily?.dates?.length ? toDaily.dates : (fromDaily?.dates || [])).slice();
   const fromSeries = new Map((fromDaily?.series || []).map((series) => [series.key, series]));
   const toSeries = new Map((toDaily?.series || []).map((series) => [series.key, series]));
@@ -178,6 +178,17 @@ function interpolateDaily(fromDaily, toDaily, t) {
   }
 
   return { dates, series };
+}
+
+export function emptyDailyLike(d) {
+  return {
+    dates: d.dates,
+    series: (d.series || []).map((s) => ({
+      key: s.key,
+      label: s.label,
+      data: s.data.map(() => 0),
+    })),
+  };
 }
 
 function interpolateHeatmap(fromHeatmap, toHeatmap, t) {
