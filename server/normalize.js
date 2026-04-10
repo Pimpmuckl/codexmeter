@@ -86,7 +86,10 @@ export function deriveAgentRole(agentRole, rawSource, title = null) {
 }
 
 export function isReviewTaskTitle(title) {
-  return typeof title === 'string' && title.startsWith('Review the code changes against the base branch ');
+  return typeof title === 'string' && (
+    title.startsWith('Review the code changes against the base branch ') ||
+    title.startsWith('You are reviewing a manually supplied diff artifact.')
+  );
 }
 
 export function isReviewLauncherSession(session) {
