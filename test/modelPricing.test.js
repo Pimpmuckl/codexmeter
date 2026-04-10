@@ -73,3 +73,21 @@ test('gpt-5 nano and gpt-5.4 nano remain distinct canonical models with matching
   assert.equal(cost54, 0.189);
   assert.equal(CATALOG_VERSION, '2026-03-17');
 });
+
+test('gpt-5.2 remains distinct from gpt-5.2-codex', async () => {
+  await initPricing();
+
+  assert.equal(normalizeModelName('gpt-5.2'), 'gpt-5.2');
+  assert.equal(normalizeModelName('gpt-5.2-codex'), 'gpt-5.2-codex');
+
+  assert.deepEqual(getModelPricing('gpt-5.2'), {
+    input: 2,
+    output: 10,
+    cached_input: 0.2,
+  });
+  assert.deepEqual(getModelPricing('gpt-5.2-codex'), {
+    input: 2,
+    output: 10,
+    cached_input: 0.2,
+  });
+});

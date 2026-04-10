@@ -536,7 +536,7 @@ export function OverviewFrame({
           </div>
         </div>
         <DailySpark
-          daily={presentation.daily}
+          daily={rawPresentation?.daily || presentation.daily}
           exportMode={exportMode}
           exportPlayback={exportPlayback}
           onDayClick={chartInteractive ? onNavigateToDailyDay : undefined}
