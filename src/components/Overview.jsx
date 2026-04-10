@@ -324,6 +324,7 @@ export function OverviewFrame({
   exportMode = false,
   exportPlayback = false,
   exportPhase = null,
+  exportSeekMs = 0,
   onNavigateToDailyDay,
   onNavigateToRepo,
   onNavigateToModel,
@@ -347,12 +348,20 @@ export function OverviewFrame({
     ? (OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartTailUpdateDurationMs
       ?? OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs
       ?? 240)
-    : (OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs ?? 30);
+    : resolveExportChartUpdateDuration(
+      exportSeekMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartIntroUpdateDurationMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs ?? 30
+    );
   const exportDonutsUpdateDuration = exportPhase === 'tail' || exportPhase === 'final_hold'
     ? (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartTailUpdateDurationMs
       ?? OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs
       ?? 240)
-    : (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs ?? 30);
+    : resolveExportChartUpdateDuration(
+      exportSeekMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartIntroUpdateDurationMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs ?? 30
+    );
 
   const chartInteractive = !exportMode && !exportPlayback;
 
@@ -678,3 +687,12 @@ function areOverviewPropsEqual(prev, next) {
 }
 
 export default memo(Overview, areOverviewPropsEqual);
+
+function resolveExportChartUpdateDuration(seekMs, introDurationMs, steadyDurationMs) {
+  const intro = Math.max(introDurationMs ?? steadyDurationMs ?? 0, steadyDurationMs ?? 0);
+  const steady = Math.max(steadyDurationMs ?? 0, 0);
+  const introWindowMs = Math.max(OVERVIEW_INGEST_ANIMATION.videoExport?.chartIntroWindowMs ?? 2200, 1);
+  const progress = Math.min(Math.max((seekMs || 0) / introWindowMs, 0), 1);
+  const eased = progress * progress * progress;
+  return Math.round(intro + ((steady - intro) * eased));
+}

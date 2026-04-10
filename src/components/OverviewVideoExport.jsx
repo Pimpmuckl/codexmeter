@@ -194,6 +194,7 @@ export default function OverviewVideoExport({ jobId }) {
             exportMode={false}
             exportPlayback={true}
             exportPhase={frameState.phase}
+            exportSeekMs={frameState.seekMs}
           />
           <div style={footerStyle}>
             Made with <span style={footerHeartStyle}>♥</span> by JJ

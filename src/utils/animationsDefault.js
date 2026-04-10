@@ -113,8 +113,11 @@ export const OVERVIEW_INGEST_ANIMATION = {
     displayTweenBaseMs: 240,
     displayTweenLateMs: 420,
     displayTweenLateWindowMs: 2200,
+    chartIntroWindowMs: 2200,
+    barsChartIntroUpdateDurationMs: 320,
     barsChartUpdateDurationMs: 50,
     barsChartTailUpdateDurationMs: 240,
+    donutsChartIntroUpdateDurationMs: 360,
     donutsChartUpdateDurationMs: 50,
     donutsChartTailUpdateDurationMs: 240,
 
