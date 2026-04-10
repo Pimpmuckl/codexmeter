@@ -53,6 +53,12 @@ function getZoomWindow(range, count) {
 }
 
 const DAILY_ZOOM_ANIM_MS = 280;
+const DAILY_ZOOM_SLIDER_LAYOUT = {
+  left: 70,
+  right: 20,
+  bottom: 12,
+  height: 24,
+};
 
 function parseDataZoomToWindow(params, dates, fallback) {
   const dz = params?.batch?.[0] ?? params;
@@ -100,6 +106,27 @@ function startDataZoomLerp(from, to, setZoom, rafRef, ms) {
   return () => {
     cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
+  };
+}
+
+function getDailyZoomSliderBounds(chartWidth, chartHeight) {
+  const left = DAILY_ZOOM_SLIDER_LAYOUT.left;
+  const right = chartWidth - DAILY_ZOOM_SLIDER_LAYOUT.right;
+  const top = chartHeight - DAILY_ZOOM_SLIDER_LAYOUT.bottom - DAILY_ZOOM_SLIDER_LAYOUT.height;
+  const bottom = chartHeight - DAILY_ZOOM_SLIDER_LAYOUT.bottom;
+  return { left, right, top, bottom };
+}
+
+function getDailyZoomSelectionBounds(chartWidth, chartHeight, datesLength, zoomWindow) {
+  const slider = getDailyZoomSliderBounds(chartWidth, chartHeight);
+  const span = Math.max(datesLength - 1, 1);
+  const startRatio = Math.max(0, Math.min(1, (zoomWindow?.startValue ?? 0) / span));
+  const endRatio = Math.max(0, Math.min(1, (zoomWindow?.endValue ?? span) / span));
+  const width = Math.max(0, slider.right - slider.left);
+  return {
+    ...slider,
+    selectionLeft: slider.left + width * Math.min(startRatio, endRatio),
+    selectionRight: slider.left + width * Math.max(startRatio, endRatio),
   };
 }
 
@@ -239,7 +266,11 @@ const DailyMainChart = React.memo(function DailyMainChart({
   const chartRef = useRef(null);
   const zoomWindowRef = useRef(zoomWindow);
   zoomWindowRef.current = zoomWindow;
+  const zoomCommitRafRef = useRef(0);
+  const pendingZoomWindowRef = useRef(null);
   const zoomAnimRafRef = useRef(0);
+  const zoomDragActiveRef = useRef(false);
+  const zoomCursorCleanupRef = useRef(null);
   const lastRangeForZoomRef = useRef(null);
   const lastCountForZoomRef = useRef(0);
   const dates = useMemo(() => daily.map((d) => d.date), [daily]);
@@ -266,6 +297,79 @@ const DailyMainChart = React.memo(function DailyMainChart({
     if (countMoved) setZoomWindow(target);
     return undefined;
   }, [range, dates.length]);
+
+  useEffect(() => {
+    return () => {
+      cancelAnimationFrame(zoomCommitRafRef.current);
+      zoomCommitRafRef.current = 0;
+      zoomCursorCleanupRef.current?.();
+      zoomCursorCleanupRef.current = null;
+    };
+  }, []);
+
+  const installZoomCursorAffordance = useCallback(() => {
+    const chart = chartRef.current?.getEchartsInstance?.();
+    if (!chart) return;
+    zoomCursorCleanupRef.current?.();
+
+    const zr = chart.getZr();
+    const applyCursor = (event) => {
+      const offsetX = event?.offsetX ?? event?.zrX;
+      const offsetY = event?.offsetY ?? event?.zrY;
+      if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY)) {
+        zr.setCursorStyle('default');
+        return;
+      }
+      const bounds = getDailyZoomSelectionBounds(chart.getWidth(), chart.getHeight(), dates.length, zoomWindowRef.current);
+      const withinBand = offsetX >= bounds.left && offsetX <= bounds.right && offsetY >= bounds.top && offsetY <= bounds.bottom;
+      if (!withinBand) {
+        zr.setCursorStyle('default');
+        return;
+      }
+      const withinSelection = offsetX >= bounds.selectionLeft && offsetX <= bounds.selectionRight;
+      if (withinSelection) {
+        zr.setCursorStyle(zoomDragActiveRef.current ? 'grabbing' : 'grab');
+        return;
+      }
+      zr.setCursorStyle('ew-resize');
+    };
+
+    const handleMouseMove = (event) => applyCursor(event);
+    const handleMouseDown = (event) => {
+      const offsetX = event?.offsetX ?? event?.zrX;
+      const offsetY = event?.offsetY ?? event?.zrY;
+      if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY)) return;
+      const bounds = getDailyZoomSelectionBounds(chart.getWidth(), chart.getHeight(), dates.length, zoomWindowRef.current);
+      const withinSelection =
+        offsetX >= bounds.selectionLeft &&
+        offsetX <= bounds.selectionRight &&
+        offsetY >= bounds.top &&
+        offsetY <= bounds.bottom;
+      zoomDragActiveRef.current = withinSelection;
+      applyCursor(event);
+    };
+    const handleMouseUp = (event) => {
+      zoomDragActiveRef.current = false;
+      applyCursor(event);
+    };
+    const handleMouseLeave = () => {
+      zoomDragActiveRef.current = false;
+      zr.setCursorStyle('default');
+    };
+
+    zr.on('mousemove', handleMouseMove);
+    zr.on('mousedown', handleMouseDown);
+    zr.on('mouseup', handleMouseUp);
+    zr.on('globalout', handleMouseLeave);
+
+    zoomCursorCleanupRef.current = () => {
+      zr.off('mousemove', handleMouseMove);
+      zr.off('mousedown', handleMouseDown);
+      zr.off('mouseup', handleMouseUp);
+      zr.off('globalout', handleMouseLeave);
+      zr.setCursorStyle('default');
+    };
+  }, [dates.length]);
 
   const appliedNavigateIdRef = useRef(null);
   useEffect(() => {
@@ -310,9 +414,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
 
   const groups = useMemo(() => {
     const set = new Set();
-    const startIdx = Math.max(0, visibleWindow.startIdx);
-    const endIdx = Math.min(daily.length - 1, visibleWindow.endIdx);
-    for (let i = startIdx; i <= endIdx; i++) {
+    for (let i = 0; i < daily.length; i++) {
       const d = daily[i];
       if (!d) continue;
       const src = split === 'model' ? d.by_model : (d.by_family || {});
@@ -327,7 +429,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
       }
     }
     return [...set];
-  }, [daily, split, visibleWindow, metric]);
+  }, [daily, split, metric]);
 
   const rawSeriesData = useMemo(() => groups.map((g) => {
     return {
@@ -508,6 +610,10 @@ const DailyMainChart = React.memo(function DailyMainChart({
     return () => window.removeEventListener('resize', onResize);
   }, [updateGraphicLabels]);
 
+  useEffect(() => {
+    installZoomCursorAffordance();
+  }, [installZoomCursorAffordance, zoomWindow]);
+
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
@@ -549,11 +655,15 @@ const DailyMainChart = React.memo(function DailyMainChart({
       },
     },
     legend: { data: groups, textStyle: { color: '#8b949e', fontSize: 10 }, top: 0, itemWidth: 10, itemHeight: 10 },
-    grid: { left: 70, right: 20, top: 35, bottom: 55 },
+    grid: { left: DAILY_ZOOM_SLIDER_LAYOUT.left, right: DAILY_ZOOM_SLIDER_LAYOUT.right, top: 35, bottom: 55 },
     dataZoom: [{
       type: 'slider',
       startValue: zoomWindow.startValue,
       endValue: zoomWindow.endValue,
+      left: DAILY_ZOOM_SLIDER_LAYOUT.left,
+      right: DAILY_ZOOM_SLIDER_LAYOUT.right,
+      bottom: DAILY_ZOOM_SLIDER_LAYOUT.bottom,
+      height: DAILY_ZOOM_SLIDER_LAYOUT.height,
       borderColor: '#30363d',
       fillerColor: 'rgba(99, 102, 241, 0.08)',
       handleStyle: { color: '#6366f1' },
@@ -594,15 +704,27 @@ const DailyMainChart = React.memo(function DailyMainChart({
         notMerge={false}
         replaceMerge={['series', 'legend', 'graphic']}
         lazyUpdate={false}
-        onChartReady={updateGraphicLabels}
+        onChartReady={() => {
+          updateGraphicLabels();
+          installZoomCursorAffordance();
+        }}
         onEvents={{
           click: (params) => {
             const date = params?.axisValue || params?.name;
             if (date) onSelectDate(date);
           },
           datazoom: (params) => {
-            setZoomWindow(parseDataZoomToWindow(params, dates, zoomWindowRef.current));
-            requestAnimationFrame(() => updateGraphicLabels());
+            pendingZoomWindowRef.current = parseDataZoomToWindow(params, dates, zoomWindowRef.current);
+            if (!zoomCommitRafRef.current) {
+              zoomCommitRafRef.current = requestAnimationFrame(() => {
+                zoomCommitRafRef.current = 0;
+                if (pendingZoomWindowRef.current) {
+                  setZoomWindow(pendingZoomWindowRef.current);
+                  pendingZoomWindowRef.current = null;
+                }
+                if (isRelative) updateGraphicLabels();
+              });
+            }
           },
         }}
       />
