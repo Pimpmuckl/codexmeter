@@ -778,7 +778,6 @@ export default function DailyUsage({
       </div>
 
       <DailyMainChart
-        key={`daily-main-chart:${range}:${daily.length}:${daily[daily.length - 1]?.date || 'none'}`}
         daily={daily}
         range={range}
         metric={metric}

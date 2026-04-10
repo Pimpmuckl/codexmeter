@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect, useRef } from 'react';
+import React, { memo, useState, useEffect, useRef, useMemo } from 'react';
 import ReactEChartsCore from '../utils/echartsReact';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
@@ -15,6 +15,7 @@ import {
   OVERVIEW_PRESENTATION_DURATION_MS,
 } from '../utils/animationsDefault';
 import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
+import { useDailyStackPresentationTween } from '../hooks/useDailyStackPresentationTween';
 import { buildOverviewPresentationTarget } from '../utils/overviewPresentation';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
@@ -63,6 +64,68 @@ function getOverviewDailyBarSizing(count) {
     return { barWidth: '54%', barMaxWidth: 18 };
   }
   return { barWidth: null, barMaxWidth: 12 };
+}
+
+function buildFullDailySparkPresentation(daily) {
+  const dailyArr = Array.isArray(daily?.data) ? daily.data : (Array.isArray(daily) ? daily : []);
+  if (!dailyArr.length) return { dates: [], series: [] };
+
+  const dates = dailyArr.map((row) => row.date);
+  const rowByDate = new Map(dailyArr.map((row) => [row.date, row]));
+  const modelSet = new Set();
+
+  for (const row of dailyArr) {
+    for (const key of Object.keys(row?.by_model || {})) {
+      modelSet.add(key);
+    }
+  }
+
+  const series = [...modelSet].map((model) => ({
+    key: model,
+    label: model,
+    data: dates.map((date) => {
+      const value = rowByDate.get(date)?.by_model?.[model]?.tokens;
+      return Number.isFinite(value) ? value : 0;
+    }),
+  }));
+
+  return { dates, series };
+}
+
+function getSparkZoomWindow(range, count) {
+  if (!count) return { startValue: 0, endValue: 0 };
+  let targetDays = count;
+  if (range === 'd7') targetDays = 7;
+  if (range === 'd30') targetDays = 30;
+  const visibleDays = Math.max(1, Math.min(targetDays, count));
+  return {
+    startValue: count - visibleDays,
+    endValue: count - 1,
+  };
+}
+
+function startSparkZoomLerp(from, to, setZoom, rafRef, ms) {
+  cancelAnimationFrame(rafRef.current);
+  rafRef.current = 0;
+  if (Math.round(from.startValue) === Math.round(to.startValue) && Math.round(from.endValue) === Math.round(to.endValue)) {
+    return undefined;
+  }
+  let t0 = 0;
+  const tick = (ts) => {
+    if (!t0) t0 = ts;
+    const u = Math.min(1, (ts - t0) / ms);
+    const w = 1 - (1 - u) ** 3;
+    setZoom({
+      startValue: Math.round(from.startValue + (to.startValue - from.startValue) * w),
+      endValue: Math.round(from.endValue + (to.endValue - from.endValue) * w),
+    });
+    rafRef.current = u < 1 ? requestAnimationFrame(tick) : 0;
+  };
+  rafRef.current = requestAnimationFrame(tick);
+  return () => {
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+  };
 }
 
 function buildOverviewDonutRows(rows, getColor) {
@@ -129,8 +192,16 @@ function buildSingleDonutLabelLayout(activeRows) {
   };
 }
 
-function DailySpark({ daily, exportMode = false, exportPlayback = false, onDayClick }) {
-  if (!daily?.dates?.length) {
+function DailySpark({
+  daily,
+  fullDaily = null,
+  range = 'total',
+  exportMode = false,
+  exportPlayback = false,
+  onDayClick,
+}) {
+  const sourceDaily = exportPlayback ? (daily?.dates?.length ? daily : fullDaily) : fullDaily;
+  if (!sourceDaily?.dates?.length) {
     return (
       <div className="overview-daily-spark overview-daily-spark-empty">
         <span className="overview-daily-spark-title">Daily Usage</span>
@@ -139,7 +210,26 @@ function DailySpark({ daily, exportMode = false, exportPlayback = false, onDayCl
     );
   }
 
-  const { barWidth, barMaxWidth } = getOverviewDailyBarSizing(daily.dates.length);
+  const [zoomWindow, setZoomWindow] = useState(() => getSparkZoomWindow(range, sourceDaily.dates.length));
+  const zoomWindowRef = useRef(zoomWindow);
+  zoomWindowRef.current = zoomWindow;
+  const zoomAnimRafRef = useRef(0);
+  const targetZoomWindow = useMemo(() => getSparkZoomWindow(range, sourceDaily.dates.length), [range, sourceDaily.dates.length]);
+  const animatedDaily = useDailyStackPresentationTween(sourceDaily, !exportMode && !exportPlayback, 'overview-daily-spark');
+
+  useEffect(() => {
+    const target = getSparkZoomWindow(range, sourceDaily.dates.length);
+    return startSparkZoomLerp(zoomWindowRef.current, target, setZoomWindow, zoomAnimRafRef, 220);
+  }, [range, sourceDaily.dates.length]);
+
+  useEffect(() => () => {
+    cancelAnimationFrame(zoomAnimRafRef.current);
+    zoomAnimRafRef.current = 0;
+  }, []);
+
+  const { startValue, endValue } = zoomWindow;
+  const visibleDateCount = Math.max(1, (endValue - startValue + 1) || sourceDaily.dates.length);
+  const { barWidth, barMaxWidth } = getOverviewDailyBarSizing(visibleDateCount);
 
   const option = {
     backgroundColor: 'transparent',
@@ -163,9 +253,17 @@ function DailySpark({ daily, exportMode = false, exportPlayback = false, onDayCl
       },
     },
     grid: { left: 4, right: 4, top: 4, bottom: 4 },
-    xAxis: { type: 'category', data: daily.dates, show: false },
+      xAxis: { type: 'category', data: sourceDaily.dates, show: false },
     yAxis: { type: 'value', show: false, scale: false, min: 0 },
-    series: daily.series.map((series) => ({
+    dataZoom: [{
+      type: 'inside',
+      filterMode: 'filter',
+      zoomLock: true,
+      startValue: zoomWindow.startValue,
+      endValue: zoomWindow.endValue,
+      disabled: true,
+    }],
+    series: animatedDaily.series.map((series) => ({
       name: series.label,
       type: 'bar',
       stack: 'total',
@@ -352,6 +450,8 @@ function Heatmap({ heatmapData, isIngestActive = false, ingestProgress = 0, onDa
 export function OverviewFrame({
   presentation,
   rawPresentation = null,
+  fullDaily = null,
+  range = 'total',
   ingestProgress = 0,
   isIngestActive = false,
   exportMode = false,
@@ -596,7 +696,9 @@ export function OverviewFrame({
           </div>
         </div>
         <DailySpark
-          daily={rawPresentation?.daily || presentation.daily}
+          daily={exportPlayback ? (rawPresentation?.daily || presentation.daily) : presentation.daily}
+          fullDaily={fullDaily}
+          range={range}
           exportMode={exportMode}
           exportPlayback={exportPlayback}
           onDayClick={chartInteractive ? onNavigateToDailyDay : undefined}
@@ -706,11 +808,17 @@ function Overview({
     () => buildOverviewPresentationTarget({ overview: data, heatmap, daily, families, repos, models, range }),
     [data, heatmap, daily, families, repos, models, range]
   );
+  const fullDaily = React.useMemo(
+    () => buildFullDailySparkPresentation(daily),
+    [daily]
+  );
 
   return (
     <OverviewFrame
       presentation={presentation}
       rawPresentation={rawPresentation}
+      fullDaily={fullDaily}
+      range={range}
       ingestProgress={ingestProgress}
       isIngestActive={isIngestActive}
       onNavigateToDailyDay={onNavigateToDailyDay}
