@@ -330,7 +330,12 @@ export function OverviewFrame({
   onNavigateToModel,
 }) {
   if (!presentation?.ready) return null;
-  const chartPresentation = exportPlayback && exportPhase === 'replay' && rawPresentation?.ready
+  const exportChartIntroWindowMs = Math.max(OVERVIEW_INGEST_ANIMATION.videoExport?.chartIntroWindowMs ?? 2200, 0);
+  const useRawExportChartPresentation = exportPlayback
+    && exportPhase === 'replay'
+    && rawPresentation?.ready
+    && exportSeekMs > exportChartIntroWindowMs;
+  const chartPresentation = useRawExportChartPresentation
     ? rawPresentation
     : presentation;
   const heatmapPresentation = (isIngestActive && rawPresentation?.heatmap)
