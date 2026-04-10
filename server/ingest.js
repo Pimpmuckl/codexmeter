@@ -341,7 +341,7 @@ function applyFilters(sessions, opts) {
   return result;
 }
 
-function assignRootThreadIds(sessions) {
+export function assignRootThreadIds(sessions, toDayKey = createDayKeyFormatter(Intl.DateTimeFormat().resolvedOptions().timeZone)) {
   const byId = new Map(sessions.map(session => [session.thread_id, session]));
   const memo = new Map();
 
@@ -352,37 +352,63 @@ function assignRootThreadIds(sessions) {
     const trail = [];
     const seen = new Set();
     let current = session;
-    let rootId = session.thread_id;
+    let root = {
+      id: session.thread_id,
+      dayKey: session.started_at ? toDayKey(session.started_at * 1000) : null,
+    };
 
     while (current) {
       trail.push(current.thread_id);
       const parentId = current.parent_thread_id;
 
       if (!parentId || parentId === current.thread_id || seen.has(parentId)) {
-        rootId = current.thread_id;
+        root = {
+          id: current.thread_id,
+          dayKey: current.started_at ? toDayKey(current.started_at * 1000) : null,
+        };
         break;
       }
 
       if (memo.has(parentId)) {
-        rootId = memo.get(parentId);
+        const parentRoot = memo.get(parentId);
+        const currentDayKey = current.started_at ? toDayKey(current.started_at * 1000) : null;
+        root = parentRoot?.dayKey && currentDayKey === parentRoot.dayKey
+          ? parentRoot
+          : {
+              id: current.thread_id,
+              dayKey: currentDayKey,
+            };
         break;
       }
 
       seen.add(parentId);
       const parent = byId.get(parentId);
       if (!parent) {
-        rootId = parentId;
+        root = {
+          id: parentId,
+          dayKey: current.started_at ? toDayKey(current.started_at * 1000) : null,
+        };
+        break;
+      }
+
+      const parentDayKey = parent.started_at ? toDayKey(parent.started_at * 1000) : null;
+      const currentDayKey = current.started_at ? toDayKey(current.started_at * 1000) : null;
+      if (currentDayKey && parentDayKey && currentDayKey !== parentDayKey) {
+        root = {
+          id: current.thread_id,
+          dayKey: currentDayKey,
+        };
         break;
       }
       current = parent;
     }
 
-    for (const threadId of trail) memo.set(threadId, rootId);
-    return rootId;
+    for (const threadId of trail) memo.set(threadId, root);
+    return root;
   };
 
   for (const session of sessions) {
-    session.root_thread_id = resolveRoot(session) || session.thread_id;
+    session.root_thread_id = resolveRoot(session)?.id || session.thread_id;
   }
 }
 

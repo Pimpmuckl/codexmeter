@@ -480,11 +480,11 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
     thread_id: root.thread_id,
     root_thread_id: rootThreadId,
     repo_label: repoLabels.size === 1 ? [...repoLabels][0] : (root.repo_label || 'mixed'),
-    model_name: root.model_name || pickSummaryValue(modelNames),
-    reasoning_effort: root.reasoning_effort || pickSummaryValue(efforts),
-    agent_role: root.agent_role,
-    agent_nickname: root.agent_nickname,
-    agent_family: root.agent_family,
+    model_name: summarizeGroupedValue(root.model_name, modelNames),
+    reasoning_effort: summarizeGroupedValue(root.reasoning_effort, efforts),
+    agent_role: summarizeGroupedValue(root.agent_role, agentRoles),
+    agent_nickname: summarizeGroupedValue(root.agent_nickname, agentNicknames),
+    agent_family: summarizeGroupedValue(root.agent_family, agentFamilySet),
     is_subagent: false,
     started_at: rootStartedAt,
     ended_at: rootEndedAt,
@@ -508,10 +508,10 @@ function collapseSessionGroup(rootThreadId, group, rootLookup) {
   };
 }
 
-function pickSummaryValue(values) {
-  if (values.size === 0) return null;
+function summarizeGroupedValue(rootValue, values) {
+  if (values.size === 0) return rootValue || null;
   if (values.size === 1) return [...values][0];
-  return `${[...values][0]} +${values.size - 1}`;
+  return 'mixed';
 }
 
 function mergeActiveByDay(target, source) {
