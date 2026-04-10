@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAggregates } from '../server/aggregator.js';
 import { classifyAgentFamily, deriveAgentRole, isReviewLauncherSession } from '../server/normalize.js';
+import { filterVisibleSessions } from '../server/ingest.js';
 
 const REVIEW_TITLE = "Review the code changes against the base branch 'main'.";
 
@@ -106,4 +107,29 @@ test('review launcher stubs do not pollute family aggregates', () => {
   assert.equal(aggregates.families.total.length, 1);
   assert.equal(aggregates.families.total[0].family, 'review');
   assert.equal(aggregates.families.total[0].tokens, 1000);
+});
+
+test('review launcher stubs are excluded from bootstrap/live-visible sessions', () => {
+  const launcher = {
+    thread_id: 'launcher',
+    source_raw: 'exec',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    tokens_used: 0,
+  };
+  const realReview = {
+    thread_id: 'review-child',
+    source_raw: '{"subagent":"review"}',
+    title: REVIEW_TITLE,
+    model_name: 'gpt-5.4',
+    usage_total: { total_tokens: 1000 },
+    has_usage_by_day: true,
+    tokens_used: 1000,
+  };
+
+  const visible = filterVisibleSessions([launcher, realReview]);
+
+  assert.deepEqual(visible.map((session) => session.thread_id), ['review-child']);
 });

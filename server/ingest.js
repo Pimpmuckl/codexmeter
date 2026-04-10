@@ -135,7 +135,9 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.phase = 'enrichment';
     queueLiveProgress(state);
 
-    const bootstrapSessions = sessions.filter((session) => !session.rollout_path);
+    const bootstrapSessions = filterVisibleSessions(
+      sessions.filter((session) => !session.rollout_path)
+    );
     if (bootstrapSessions.length) {
       assignRootThreadIds(sessions);
       const bootstrapPatch = createEmptyLivePatch();
@@ -212,7 +214,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         state.current_date_bucket = liveReady[0].live_sort_day;
       }
       const livePatch = createEmptyLivePatch();
-      for (const session of liveReady.filter((candidate) => !isReviewLauncherSession(candidate))) {
+      for (const session of filterVisibleSessions(liveReady)) {
         applySessionToLiveState(state.live_state, session, livePatch);
       }
       queueLivePatch(state, livePatch);
@@ -232,7 +234,7 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     assignRootThreadIds(sessions);
     const finalLivePatch = createEmptyLivePatch();
-    for (const session of flushBufferedLiveSessions(state).filter((candidate) => !isReviewLauncherSession(candidate))) {
+    for (const session of filterVisibleSessions(flushBufferedLiveSessions(state))) {
       applySessionToLiveState(state.live_state, session, finalLivePatch);
     }
     queueLivePatch(state, finalLivePatch);
@@ -297,13 +299,18 @@ export function restartIngest(codexHome, state, opts = {}) {
 }
 
 function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
-  const source = (mode.partial ? sessions.filter(session => session.materialized) : sessions)
-    .filter(session => !isReviewLauncherSession(session));
+  const source = filterVisibleSessions(
+    mode.partial ? sessions.filter(session => session.materialized) : sessions
+  );
   const filtered = applyFilters(source, opts);
   const sessionView = buildSessionView(filtered, source);
   state.sessions = sessionView;
   state.aggregates = buildAggregates(filtered, tz, sessionView);
   state.generated_at = new Date().toISOString();
+}
+
+export function filterVisibleSessions(sessions) {
+  return sessions.filter((session) => !isReviewLauncherSession(session));
 }
 
 function applyFilters(sessions, opts) {
