@@ -111,8 +111,6 @@ export function isReviewLauncherSession(session) {
     !session?.model_name &&
     !session?.usage_total &&
     !session?.has_usage_by_day &&
-    !session?.elapsed_seconds &&
-    !session?.active_by_day &&
     !session?.tokens_used;
 }
 

@@ -103,7 +103,7 @@ test('pre-enrichment rollout-backed review rows are not hidden as launchers', ()
   assert.equal(isReviewLauncherSession(pendingReview), false);
 });
 
-test('materialized zero-token review rows with elapsed activity remain visible', () => {
+test('materialized zero-token review rows with elapsed activity are suppressed as launcher stubs', () => {
   const timedReview = {
     source_raw: 'cli',
     title: REVIEW_TITLE,
@@ -115,7 +115,7 @@ test('materialized zero-token review rows with elapsed activity remain visible',
     tokens_used: 0,
   };
 
-  assert.equal(isReviewLauncherSession(timedReview), false);
+  assert.equal(isReviewLauncherSession(timedReview), true);
 });
 
 test('review launcher stubs do not pollute family aggregates', () => {
@@ -195,6 +195,33 @@ test('review launcher stubs are excluded from bootstrap/live-visible sessions', 
     model_name: null,
     usage_total: null,
     has_usage_by_day: false,
+    tokens_used: 0,
+  };
+  const realReview = {
+    thread_id: 'review-child',
+    source_raw: '{"subagent":"review"}',
+    title: REVIEW_TITLE,
+    model_name: 'gpt-5.4',
+    usage_total: { total_tokens: 1000 },
+    has_usage_by_day: true,
+    tokens_used: 1000,
+  };
+
+  const visible = filterVisibleSessions([launcher, realReview]);
+
+  assert.deepEqual(visible.map((session) => session.thread_id), ['review-child']);
+});
+
+test('timed zero-token review launcher rows are excluded from bootstrap/live-visible sessions', () => {
+  const launcher = {
+    thread_id: 'launcher',
+    source_raw: 'cli',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    elapsed_seconds: 120,
+    active_by_day: { '2026-04-10': 120 },
     tokens_used: 0,
   };
   const realReview = {
