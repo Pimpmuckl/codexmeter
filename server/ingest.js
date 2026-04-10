@@ -298,10 +298,9 @@ export function restartIngest(codexHome, state, opts = {}) {
 }
 
 function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
-  const source = filterVisibleSessions(
-    mode.partial ? sessions.filter(session => session.materialized) : sessions
-  );
-  const filtered = applyFilters(source, opts);
+  const source = mode.partial ? sessions.filter(session => session.materialized) : sessions;
+  const visibleSource = filterVisibleSessions(source);
+  const filtered = applyFilters(visibleSource, opts);
   const sessionView = buildSessionView(filtered, source);
   state.sessions = sessionView;
   state.aggregates = buildAggregates(filtered, tz, sessionView);

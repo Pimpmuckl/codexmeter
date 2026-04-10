@@ -76,7 +76,7 @@ export function parseThreadSource(rawSource) {
 }
 
 export function deriveAgentRole(agentRole, rawSource, title = null) {
-  if (agentRole) return agentRole;
+  if (agentRole && agentRole !== 'default') return agentRole;
   const source = parseThreadSource(rawSource);
   if (source && typeof source === 'object' && typeof source.subagent === 'string') {
     return source.subagent;
