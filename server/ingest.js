@@ -148,9 +148,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       queueLivePatch(state, bootstrapPatch);
     }
 
-    const candidates = filterVisibleSessions(sessions)
-      .filter(s => s.rollout_path)
-      .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
+    const candidates = selectEnrichmentCandidates(sessions);
 
     state.needs_enrichment = candidates.length;
     state.percent = candidates.length > 0 ? 0.08 : 0.90;
@@ -309,6 +307,12 @@ function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
 
 export function filterVisibleSessions(sessions) {
   return sessions.filter((session) => !isReviewLauncherSession(session));
+}
+
+export function selectEnrichmentCandidates(sessions) {
+  return sessions
+    .filter((session) => session.rollout_path)
+    .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
 }
 
 export function pickVisibleDateBucket(bufferedSessions, liveReadySessions) {

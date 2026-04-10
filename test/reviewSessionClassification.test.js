@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAggregates, buildSessionView } from '../server/aggregator.js';
 import { classifyAgentFamily, deriveAgentRole, isReviewLauncherSession } from '../server/normalize.js';
-import { filterVisibleSessions, pickVisibleDateBucket } from '../server/ingest.js';
+import { filterVisibleSessions, pickVisibleDateBucket, selectEnrichmentCandidates } from '../server/ingest.js';
 
 const REVIEW_TITLE = "Review the code changes against the base branch 'main'.";
 
@@ -249,4 +249,33 @@ test('hidden launcher roots still anchor the grouped session view', () => {
   assert.equal(grouped[0].root_thread_id, 'launcher');
   assert.equal(grouped[0].subagent_count, 1);
   assert.equal(grouped[0].title, REVIEW_TITLE);
+});
+
+test('enrichment candidates keep rollout-backed review rows before visibility filtering', () => {
+  const pendingReview = {
+    thread_id: 'pending-review',
+    rollout_path: 'C:/tmp/review.jsonl',
+    started_at: 2,
+    source_raw: 'cli',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    tokens_used: 0,
+  };
+  const launcher = {
+    thread_id: 'launcher',
+    rollout_path: null,
+    started_at: 1,
+    source_raw: 'cli',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    tokens_used: 0,
+  };
+
+  const candidates = selectEnrichmentCandidates([pendingReview, launcher]);
+
+  assert.deepEqual(candidates.map((session) => session.thread_id), ['pending-review']);
 });
