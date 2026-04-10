@@ -78,6 +78,13 @@ function buildOverviewDonutRows(rows, getColor) {
   });
 }
 
+function scaleMetricRows(rows, scale) {
+  return rows.map((row) => ({
+    ...row,
+    tokens: Math.max(0, (row.tokens || 0) * scale),
+  }));
+}
+
 function buildSingleDonutLabelLayout(activeRows) {
   if (activeRows.length !== 1) return null;
   return (params) => {
@@ -330,21 +337,25 @@ export function OverviewFrame({
   onNavigateToModel,
 }) {
   if (!presentation?.ready) return null;
-  const exportChartIntroWindowMs = Math.max(OVERVIEW_INGEST_ANIMATION.videoExport?.chartIntroWindowMs ?? 2200, 0);
-  const useRawExportChartPresentation = exportPlayback
-    && exportPhase === 'replay'
-    && rawPresentation?.ready
-    && exportSeekMs > exportChartIntroWindowMs;
-  const chartPresentation = useRawExportChartPresentation
+  const exportChartIntroProgress = exportPlayback
+    ? resolveExportChartIntroProgress(exportSeekMs)
+    : 1;
+  const chartPresentation = exportPlayback && exportPhase === 'replay' && rawPresentation?.ready
     ? rawPresentation
     : presentation;
   const heatmapPresentation = (isIngestActive && rawPresentation?.heatmap)
     ? rawPresentation.heatmap
     : presentation.heatmap;
   const { stats, topRepos, topFamilies, topModels } = presentation;
-  const chartTopRepos = chartPresentation.topRepos || [];
-  const chartTopFamilies = chartPresentation.topFamilies || [];
-  const chartTopModels = chartPresentation.topModels || [];
+  const chartTopRepos = exportPlayback && exportPhase === 'replay'
+    ? scaleMetricRows(chartPresentation.topRepos || [], exportChartIntroProgress)
+    : (chartPresentation.topRepos || []);
+  const chartTopFamilies = exportPlayback && exportPhase === 'replay'
+    ? scaleMetricRows(chartPresentation.topFamilies || [], exportChartIntroProgress)
+    : (chartPresentation.topFamilies || []);
+  const chartTopModels = exportPlayback && exportPhase === 'replay'
+    ? scaleMetricRows(chartPresentation.topModels || [], exportChartIntroProgress)
+    : (chartPresentation.topModels || []);
   const reversedRepos = [...chartTopRepos.slice(0, 6)].reverse();
   const maxRepoTokens = Math.max(...chartTopRepos.slice(0, 6).map(row => row.tokens || 0), 1);
   const orderedFamilies = [...chartTopFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
@@ -585,7 +596,7 @@ export function OverviewFrame({
         <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={true} />
+            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -599,7 +610,7 @@ export function OverviewFrame({
               style={{ height: 180, cursor: modelChartEvents ? 'pointer' : undefined }}
               theme="dark"
               lazyUpdate={false}
-              notMerge={true}
+              notMerge={exportMode}
               onEvents={modelChartEvents}
             />
           ) : (
@@ -700,4 +711,10 @@ function resolveExportChartUpdateDuration(seekMs, introDurationMs, steadyDuratio
   const progress = Math.min(Math.max((seekMs || 0) / introWindowMs, 0), 1);
   const eased = progress * progress * progress;
   return Math.round(intro + ((steady - intro) * eased));
+}
+
+function resolveExportChartIntroProgress(seekMs) {
+  const introWindowMs = Math.max(OVERVIEW_INGEST_ANIMATION.videoExport?.chartIntroWindowMs ?? 2200, 1);
+  const progress = Math.min(Math.max((seekMs || 0) / introWindowMs, 0), 1);
+  return progress * progress;
 }
