@@ -135,11 +135,10 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.phase = 'enrichment';
     queueLiveProgress(state);
 
-    const bootstrapSessions = filterVisibleSessions(
-      sessions.filter((session) => !session.rollout_path)
-    );
-    if (bootstrapSessions.length) {
+    const bootstrapCandidates = sessions.filter((session) => !session.rollout_path);
+    if (bootstrapCandidates.length) {
       assignRootThreadIds(sessions);
+      const bootstrapSessions = filterVisibleSessions(bootstrapCandidates);
       const bootstrapPatch = createEmptyLivePatch();
       for (const session of bootstrapSessions) {
         finalizeSessionMetrics(session, toDayKey);

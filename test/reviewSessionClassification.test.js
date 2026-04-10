@@ -73,6 +73,21 @@ test('review exec and cli launcher sessions are suppressed while real review ses
   assert.equal(isReviewLauncherSession(realReview), false);
 });
 
+test('codex-cli launcher source still counts as a launcher stub', () => {
+  const launcher = {
+    source_raw: 'codex-cli',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    elapsed_seconds: null,
+    active_by_day: null,
+    tokens_used: 0,
+  };
+
+  assert.equal(isReviewLauncherSession(launcher), true);
+});
+
 test('pre-enrichment rollout-backed review rows are not hidden as launchers', () => {
   const pendingReview = {
     rollout_path: 'C:/tmp/review.jsonl',
@@ -86,6 +101,21 @@ test('pre-enrichment rollout-backed review rows are not hidden as launchers', ()
   };
 
   assert.equal(isReviewLauncherSession(pendingReview), false);
+});
+
+test('materialized zero-token review rows with elapsed activity remain visible', () => {
+  const timedReview = {
+    source_raw: 'cli',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    elapsed_seconds: 120,
+    active_by_day: { '2026-04-10': 120 },
+    tokens_used: 0,
+  };
+
+  assert.equal(isReviewLauncherSession(timedReview), false);
 });
 
 test('review launcher stubs do not pollute family aggregates', () => {
@@ -249,6 +279,8 @@ test('hidden launcher roots still anchor the grouped session view', () => {
   assert.equal(grouped[0].root_thread_id, 'launcher');
   assert.equal(grouped[0].subagent_count, 1);
   assert.equal(grouped[0].title, REVIEW_TITLE);
+  assert.equal(grouped[0].agent_family, 'review');
+  assert.equal(grouped[0].model_name, 'gpt-5.4');
 });
 
 test('enrichment candidates keep rollout-backed review rows before visibility filtering', () => {

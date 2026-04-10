@@ -106,12 +106,22 @@ export function isReviewLauncherSession(session) {
   if (session?.rollout_path && !session?.materialized) return false;
   const source = parseThreadSource(session?.source_raw);
   const sourceKind = source?.kind || (typeof source === 'string' ? source : null);
-  return (sourceKind === 'exec' || sourceKind === 'cli') &&
+  return isLauncherSourceKind(sourceKind) &&
     isReviewTaskTitle(session?.title) &&
     !session?.model_name &&
     !session?.usage_total &&
     !session?.has_usage_by_day &&
+    !session?.elapsed_seconds &&
+    !session?.active_by_day &&
     !session?.tokens_used;
+}
+
+function isLauncherSourceKind(sourceKind) {
+  const normalized = String(sourceKind || '').trim().toLowerCase();
+  return normalized === 'exec' ||
+    normalized === 'cli' ||
+    normalized.endsWith('-cli') ||
+    normalized.endsWith('_cli');
 }
 
 const MODEL_ALIASES = {
