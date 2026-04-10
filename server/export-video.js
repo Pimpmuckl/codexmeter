@@ -239,7 +239,7 @@ export function createExportManager({ getReplay, getSettledEnvelope, getBaseUrl 
             finished: window.__CODEXMETER_EXPORT__?.finished === true,
           }));
           const ratio = Math.min(1, Math.max(0, (playback.currentTimeMs || 0) / Math.max(job.duration_ms, 1)));
-          updateJob(job, 'rendering', 0.05 + ratio * 0.8, 'running');
+          updateJob(job, 'rendering', Math.max(job.progress || 0, 0.05 + ratio * 0.8), 'running');
           if (playback.finished) break;
           if (Date.now() - startedAt > Math.max(30000, job.duration_ms * 4)) {
             throw new Error('Export playback timed out before completion');
