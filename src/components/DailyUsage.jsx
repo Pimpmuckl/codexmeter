@@ -39,11 +39,16 @@ function exportChart(ref) {
   Object.assign(document.createElement('a'), { href: url, download: 'codexmeter-daily.png' }).click();
 }
 
-function getZoomStart(range, count) {
-  if (!count) return 0;
-  if (range === 'd7') return Math.max(0, 100 - (7 / count) * 100);
-  if (range === 'd30') return Math.max(0, 100 - (30 / count) * 100);
-  return 0;
+function getZoomWindow(range, count) {
+  if (!count) return { startValue: 0, endValue: 0 };
+  let targetDays = count;
+  if (range === 'd7') targetDays = 7;
+  if (range === 'd30') targetDays = 30;
+  const visibleDays = Math.max(1, Math.min(targetDays, count));
+  return {
+    startValue: count - visibleDays,
+    endValue: count - 1,
+  };
 }
 
 function getVisibleBarWidth(range, count) {
@@ -60,6 +65,21 @@ function getVisibleBarPercent(range, count) {
   if (count <= 14) return '64%';
   if (count <= 31) return '48%';
   return '36%';
+}
+
+function getDayMetricValue(day, metricKey) {
+  if (!day) return 0;
+  if (metricKey === 'elapsed_seconds') return day.elapsed_seconds || 0;
+  if (metricKey === 'cost') return day.cost || 0;
+  return day.tokens || 0;
+}
+
+function formatDayDetailTitle(day, metricKey) {
+  if (!day) return 'Day detail';
+  const metric = METRICS.find((entry) => entry.key === metricKey) || METRICS[0];
+  const weekday = new Date(`${day.date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' });
+  const metricValue = metric.fn(getDayMetricValue(day, metricKey));
+  return `Day detail: ${weekday} - ${day.date} - ${metric.label}: ${metricValue}`;
 }
 
 /** Find the largest rectangle that fits in the band (histogram), return center [x, y] */
@@ -161,36 +181,52 @@ const DailyMainChart = React.memo(function DailyMainChart({
   displayMode,
   onSelectDate,
 }) {
-  const [zoomWindow, setZoomWindow] = useState({ start: 0, end: 100 });
+  const [zoomWindow, setZoomWindow] = useState({ startValue: 0, endValue: 0 });
   const chartRef = useRef(null);
   const dates = daily.map((d) => d.date);
   const curMetric = METRICS.find((m) => m.key === metric);
-  const zoomStart = useMemo(() => getZoomStart(range, dates.length), [range, dates.length]);
+  const targetZoomWindow = useMemo(() => getZoomWindow(range, dates.length), [range, dates.length]);
 
   useEffect(() => {
-    setZoomWindow({ start: zoomStart, end: 100 });
-  }, [zoomStart]);
+    setZoomWindow(targetZoomWindow);
+  }, [targetZoomWindow]);
 
   const visibleDateCount = useMemo(() => {
     if (!dates.length) return 0;
-    const startPct = Math.max(0, Math.min(100, zoomWindow.start ?? zoomStart));
-    const endPct = Math.max(startPct, Math.min(100, zoomWindow.end ?? 100));
-    const startIdx = Math.max(0, Math.floor((startPct / 100) * dates.length));
-    const endIdx = Math.min(dates.length - 1, Math.ceil((endPct / 100) * dates.length) - 1);
+    const startIdx = Math.max(0, Math.min(dates.length - 1, Math.floor(zoomWindow.startValue ?? targetZoomWindow.startValue ?? 0)));
+    const endIdx = Math.max(startIdx, Math.min(dates.length - 1, Math.floor(zoomWindow.endValue ?? targetZoomWindow.endValue ?? (dates.length - 1))));
     return Math.max(1, endIdx - startIdx + 1);
-  }, [dates.length, zoomWindow, zoomStart]);
+  }, [dates.length, zoomWindow, targetZoomWindow]);
+  const visibleWindow = useMemo(() => {
+    if (!dates.length) return { startIdx: 0, endIdx: -1 };
+    const startIdx = Math.max(0, Math.min(dates.length - 1, Math.floor(zoomWindow.startValue ?? targetZoomWindow.startValue ?? 0)));
+    const endIdx = Math.max(startIdx, Math.min(dates.length - 1, Math.floor(zoomWindow.endValue ?? targetZoomWindow.endValue ?? (dates.length - 1))));
+    return { startIdx, endIdx };
+  }, [dates.length, zoomWindow, targetZoomWindow]);
 
   const visibleBarWidth = useMemo(() => getVisibleBarWidth(range, visibleDateCount), [range, visibleDateCount]);
   const visibleBarPercent = useMemo(() => getVisibleBarPercent(range, visibleDateCount), [range, visibleDateCount]);
 
   const groups = useMemo(() => {
     const set = new Set();
-    for (const d of daily) {
+    const startIdx = Math.max(0, visibleWindow.startIdx);
+    const endIdx = Math.min(daily.length - 1, visibleWindow.endIdx);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const d = daily[i];
+      if (!d) continue;
       const src = split === 'model' ? d.by_model : (d.by_family || {});
-      for (const k of Object.keys(src)) set.add(k);
+      for (const [k, v] of Object.entries(src)) {
+        if (!v) continue;
+        const value = metric === 'elapsed_seconds'
+          ? (v.elapsed_seconds || 0)
+          : metric === 'cost'
+            ? (v.cost || 0)
+            : (v.tokens || 0);
+        if (value > 0) set.add(k);
+      }
     }
     return [...set];
-  }, [daily, split]);
+  }, [daily, split, visibleWindow, metric]);
 
   const rawSeriesData = useMemo(() => groups.map((g) => {
     return {
@@ -211,7 +247,19 @@ const DailyMainChart = React.memo(function DailyMainChart({
     }
     return sum;
   }), [daily, rawSeriesData]);
-  const maxDayTotal = useMemo(() => Math.max(...dayTotals, 0), [dayTotals]);
+  const maxVisibleDayTotal = useMemo(() => {
+    if (!dayTotals.length || visibleWindow.endIdx < visibleWindow.startIdx) return 0;
+    let maxVal = 0;
+    for (let i = visibleWindow.startIdx; i <= visibleWindow.endIdx; i++) {
+      maxVal = Math.max(maxVal, dayTotals[i] || 0);
+    }
+    return maxVal;
+  }, [dayTotals, visibleWindow]);
+  const absoluteYAxisMax = useMemo(() => {
+    if (displayMode === 'relative') return 100;
+    if (!maxVisibleDayTotal) return undefined;
+    return Math.ceil(maxVisibleDayTotal * 1.1);
+  }, [displayMode, maxVisibleDayTotal]);
 
   const isRelative = displayMode === 'relative';
   let cumulativeData = null;
@@ -348,9 +396,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
         }
         const displayTotal = displayMode === 'relative' && total === 0 ? (dayTotals[prevIdx] ?? 0) : total;
         let html = `<b>${params[0].axisValue}</b><br/>`;
-        const sorted = [...params]
-          .filter((p) => p.seriesName !== '__day_click_overlay__' && p.value > 0)
-          .sort((a, b) => (b.value || 0) - (a.value || 0));
+        const sorted = [...params].filter((p) => p.value > 0).sort((a, b) => (b.value || 0) - (a.value || 0));
         for (const p of sorted) {
           const rawVal = displayMode === 'relative'
             ? (rawSeriesData.find((s) => s.name === p.seriesName)?.values[prevIdx] ?? 0)
@@ -371,39 +417,32 @@ const DailyMainChart = React.memo(function DailyMainChart({
     grid: { left: 70, right: 20, top: 35, bottom: 55 },
     dataZoom: [{
       type: 'slider',
-      start: zoomWindow.start,
-      end: zoomWindow.end,
+      startValue: zoomWindow.startValue,
+      endValue: zoomWindow.endValue,
       borderColor: '#30363d',
       fillerColor: 'rgba(99, 102, 241, 0.08)',
       handleStyle: { color: '#6366f1' },
       textStyle: { color: '#484f58' },
     }],
-    xAxis: { type: 'category', data: dates, axisLabel: { color: '#484f58', fontSize: 10, rotate: 45 }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#30363d' } } },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      boundaryGap: displayMode !== 'relative',
+      axisLabel: { color: '#484f58', fontSize: 10, rotate: 45 },
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#30363d' } },
+    },
     yAxis: {
       type: 'value',
       min: displayMode === 'relative' ? 0 : undefined,
-      max: displayMode === 'relative' ? 100 : undefined,
+      max: displayMode === 'relative' ? 100 : absoluteYAxisMax,
       axisLabel: {
         formatter: displayMode === 'relative' ? (v) => v + '%' : (v) => curMetric.fn(v),
         color: '#484f58',
       },
       splitLine: { lineStyle: { color: '#21262d' } },
     },
-    series: [
-      ...series,
-      {
-        name: '__day_click_overlay__',
-        type: 'bar',
-        data: dayTotals.map(() => (displayMode === 'relative' ? 100 : maxDayTotal)),
-        barWidth: '96%',
-        barGap: '-100%',
-        itemStyle: { color: 'rgba(0,0,0,0)' },
-        emphasis: { disabled: true },
-        tooltip: { show: false },
-        z: 100,
-        animation: false,
-      },
-    ],
+    series,
     ...ECHARTS_ANIMATION,
   };
 
@@ -430,8 +469,8 @@ const DailyMainChart = React.memo(function DailyMainChart({
             const dz = chart?.getOption()?.dataZoom?.[0];
             if (dz) {
               setZoomWindow({
-                start: typeof dz.start === 'number' ? dz.start : zoomStart,
-                end: typeof dz.end === 'number' ? dz.end : 100,
+                startValue: typeof dz.startValue === 'number' ? dz.startValue : targetZoomWindow.startValue,
+                endValue: typeof dz.endValue === 'number' ? dz.endValue : targetZoomWindow.endValue,
               });
             }
             requestAnimationFrame(() => updateGraphicLabels());
@@ -492,7 +531,9 @@ export default function DailyUsage({ data, range = 'total', chartMode = 'default
 
       {selectedDay && (
         <div className="chart-card">
-          <div className="chart-title" style={{ marginBottom: '0.75rem' }}>Day detail: {selectedDay.date}</div>
+          <div className="chart-title" style={{ marginBottom: '0.75rem' }}>
+            {formatDayDetailTitle(selectedDay, metric)}
+          </div>
           <DayDetail day={selectedDay} chartMode={chartMode} />
         </div>
       )}
