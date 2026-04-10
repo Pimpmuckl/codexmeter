@@ -103,6 +103,7 @@ export function isReviewTaskTitle(title) {
 }
 
 export function isReviewLauncherSession(session) {
+  if (session?.rollout_path && !session?.materialized) return false;
   const source = parseThreadSource(session?.source_raw);
   const sourceKind = source?.kind || (typeof source === 'string' ? source : null);
   return (sourceKind === 'exec' || sourceKind === 'cli') &&

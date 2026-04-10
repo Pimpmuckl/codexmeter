@@ -58,6 +58,8 @@ test('review exec and cli launcher sessions are suppressed while real review ses
     tokens_used: 0,
   };
   const realReview = {
+    rollout_path: 'C:/tmp/review.jsonl',
+    materialized: false,
     source_raw: '{"subagent":"review"}',
     title: REVIEW_TITLE,
     model_name: 'gpt-5.4',
@@ -69,6 +71,21 @@ test('review exec and cli launcher sessions are suppressed while real review ses
   assert.equal(isReviewLauncherSession(launcher), true);
   assert.equal(isReviewLauncherSession(cliLauncher), true);
   assert.equal(isReviewLauncherSession(realReview), false);
+});
+
+test('pre-enrichment rollout-backed review rows are not hidden as launchers', () => {
+  const pendingReview = {
+    rollout_path: 'C:/tmp/review.jsonl',
+    materialized: false,
+    source_raw: 'cli',
+    title: REVIEW_TITLE,
+    model_name: null,
+    usage_total: null,
+    has_usage_by_day: false,
+    tokens_used: 0,
+  };
+
+  assert.equal(isReviewLauncherSession(pendingReview), false);
 });
 
 test('review launcher stubs do not pollute family aggregates', () => {
