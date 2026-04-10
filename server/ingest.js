@@ -10,6 +10,7 @@ import { createDayKeyFormatter } from './day-key.js';
 import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap, buildLivePatch } from './live-state.js';
 import { createRolloutWorkerPool } from './rollout-worker-pool.js';
 import { beginReplayCapture, createReplayCaptureState, failReplayCapture, getReplaySnapshot, recordReplayEvent, resetReplayCapture } from './export-replay.js';
+import { findUsageEntryAtOrBefore, hasUsageTotals, readUsageTimeline, subtractUsageTotals } from './rollout-reader.js';
 import { OVERVIEW_INGEST_ANIMATION } from '../src/utils/animationsDefault.js';
 
 const LIVE_FRAME_INTERVAL_MS = Math.max(
@@ -124,6 +125,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         agent_family: classifyAgentFamily(agentRole),
         is_subagent: isSubagent(agentRole),
         parent_thread_id: null,
+        forked_from_id: null,
         cost: null,
         cost_source: 'unavailable',
         materialized: !t.rollout_path,
@@ -153,6 +155,7 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.percent = candidates.length > 0 ? 0.08 : 0.90;
     const BATCH_SIZE = opts.batchSize || 40;
     const ROOT_REFRESH_EVERY = opts.rootRefreshEvery || 1000;
+    const resolveForkUsageSnapshot = createForkUsageSnapshotResolver(sessions);
     let lastRootRefreshCount = 0;
 
     for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
@@ -178,12 +181,18 @@ export async function runIngest(codexHome, state, opts = {}) {
           if (data.model_name) s.model_name = normalizeModelName(data.model_name);
           if (data.reasoning_effort) s.reasoning_effort = data.reasoning_effort;
           if (data.parent_thread_id) s.parent_thread_id = data.parent_thread_id;
+          if (data.forked_from_id) s.forked_from_id = data.forked_from_id;
           if (data.usage_total) s.usage_total = data.usage_total;
+          if (data.usage_by_day) s._usage_by_day_raw = structuredClone(data.usage_by_day);
           if (data.usage_by_day) {
             s.usage_by_day = buildUsageByDayMetrics(s.model_name, data.usage_by_day);
             s.has_usage_by_day = s.usage_by_day.length > 0;
           }
+          if (data.usage_reset_detected) {
+            s._usage_reset_detected = true;
+          }
           if (data.first_usage_timestamp) {
+            s._first_usage_timestamp_ms = data.first_usage_timestamp;
             s.live_sort_ts = Math.floor(data.first_usage_timestamp / 1000);
           }
           if (data.active_seconds && data.active_seconds > 0) {
@@ -191,6 +200,17 @@ export async function runIngest(codexHome, state, opts = {}) {
             s.active_by_day = data.active_by_day || null;
           }
         }
+      }
+
+      await applyForkUsageCorrections(batch, resolveForkUsageSnapshot);
+      for (const s of batch) {
+        if (s._usage_by_day_raw) {
+          s.usage_by_day = buildUsageByDayMetrics(s.model_name, s._usage_by_day_raw);
+          s.has_usage_by_day = s.usage_by_day.length > 0;
+        }
+        delete s._usage_by_day_raw;
+        delete s._first_usage_timestamp_ms;
+        delete s._usage_reset_detected;
         finalizeSessionMetrics(s, toDayKey);
         s.live_sort_day = deriveLiveSortDay(s, toDayKey);
         s.materialized = true;
@@ -446,6 +466,130 @@ function buildUsageByDayMetrics(modelName, usageByDay) {
   }
   entries.sort((a, b) => a.day.localeCompare(b.day));
   return entries;
+}
+
+function createForkUsageSnapshotResolver(sessions) {
+  const byId = new Map(sessions.map((session) => [session.thread_id, session]));
+  const timelineCache = new Map();
+
+  return async function resolveForkUsageSnapshot(parentThreadId, boundary) {
+    if (!parentThreadId || !boundary) return null;
+    const parent = byId.get(parentThreadId);
+    if (!parent?.rollout_path) return null;
+
+    let timelinePromise = timelineCache.get(parentThreadId);
+    if (!timelinePromise) {
+      timelinePromise = readUsageTimeline(parent.rollout_path);
+      timelineCache.set(parentThreadId, timelinePromise);
+    }
+
+    const timeline = await timelinePromise;
+    return selectForkParentUsageEntry(timeline, boundary)?.usage || null;
+  };
+}
+
+export function selectForkParentUsageEntry(timeline, {
+  startedAtMs = null,
+  firstUsageTimestampMs = null,
+} = {}) {
+  if (!Array.isArray(timeline) || !timeline.length) return null;
+  const startEntry = findUsageEntryAtOrBefore(timeline, startedAtMs);
+  const firstUsageEntry = findUsageEntryAtOrBefore(timeline, firstUsageTimestampMs);
+  if (startEntry && firstUsageEntry && startEntry.segment_id !== firstUsageEntry.segment_id) {
+    return startEntry;
+  }
+  return firstUsageEntry || startEntry || null;
+}
+
+async function applyForkUsageCorrections(sessions, resolveForkUsageSnapshot) {
+  for (const session of sessions) {
+    const parentThreadId = getForkLineageParentThreadId(session);
+    if (!parentThreadId) continue;
+    if (session._usage_reset_detected) continue;
+    // Use the child's first observed token snapshot as the primary fork
+    // boundary. On the real fork-heavy March chains, this consistently
+    // produced better attribution than started_at: the delay from start to
+    // first token_count is usually sub-second, while started_at retains
+    // slightly more inherited parent usage. We still pass started_at through
+    // to the resolver so a parent reset between fork start and first child
+    // stream can fall back to the pre-reset parent segment instead of
+    // under-subtracting inherited usage. If the child rollout later resets its
+    // token counters, we treat the post-reset segment as the authoritative
+    // child-only usage and do not subtract the parent again, because that
+    // would double-normalize the same inherited baseline and undercount the
+    // child.
+    const inheritedUsage = await resolveForkUsageSnapshot(parentThreadId, {
+      startedAtMs: session.started_at ? session.started_at * 1000 : null,
+      firstUsageTimestampMs: session._first_usage_timestamp_ms || null,
+    });
+    applyForkUsageCorrection(session, inheritedUsage);
+  }
+}
+
+export function getForkLineageParentThreadId(session) {
+  return session?.forked_from_id || null;
+}
+
+export function applyForkUsageCorrection(session, inheritedUsage) {
+  if (!hasUsageTotals(inheritedUsage)) return false;
+
+  let changed = false;
+
+  if (session?.usage_total) {
+    session.usage_total = subtractUsageTotals(session.usage_total, inheritedUsage);
+    session.tokens_used = session.usage_total.total_tokens || 0;
+    changed = true;
+  } else if (typeof session?.tokens_used === 'number') {
+    session.tokens_used = Math.max(session.tokens_used - (inheritedUsage.total_tokens || 0), 0);
+    changed = true;
+  }
+
+  if (session._usage_by_day_raw) {
+    session._usage_by_day_raw = subtractUsageFromDayBuckets(session._usage_by_day_raw, inheritedUsage);
+    changed = true;
+  }
+
+  return changed;
+}
+
+function subtractUsageFromDayBuckets(usageByDay, inheritedUsage) {
+  const remaining = {
+    input_tokens: inheritedUsage?.input_tokens || 0,
+    cached_input_tokens: inheritedUsage?.cached_input_tokens || 0,
+    output_tokens: inheritedUsage?.output_tokens || 0,
+    reasoning_output_tokens: inheritedUsage?.reasoning_output_tokens || 0,
+    total_tokens: inheritedUsage?.total_tokens || 0,
+  };
+
+  const next = {};
+  for (const dayKey of Object.keys(usageByDay || {}).sort()) {
+    const current = usageByDay[dayKey] || {};
+    const adjusted = subtractUsageTotals({
+      input_tokens: current.input_tokens || 0,
+      cached_input_tokens: current.cached_input_tokens || 0,
+      output_tokens: current.output_tokens || 0,
+      total_tokens: (current.input_tokens || 0) + (current.output_tokens || 0),
+    }, remaining);
+
+    const consumed = subtractUsageTotals({
+      input_tokens: current.input_tokens || 0,
+      cached_input_tokens: current.cached_input_tokens || 0,
+      output_tokens: current.output_tokens || 0,
+      total_tokens: (current.input_tokens || 0) + (current.output_tokens || 0),
+    }, adjusted);
+
+    Object.assign(remaining, subtractUsageTotals(remaining, consumed));
+
+    if (adjusted.input_tokens > 0 || adjusted.cached_input_tokens > 0 || adjusted.output_tokens > 0) {
+      next[dayKey] = {
+        input_tokens: adjusted.input_tokens,
+        cached_input_tokens: adjusted.cached_input_tokens,
+        output_tokens: adjusted.output_tokens,
+      };
+    }
+  }
+
+  return next;
 }
 
 function deriveLiveSortDay(session, toDayKey) {
