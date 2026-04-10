@@ -262,7 +262,7 @@ function buildDaily(rawSessions, groupedSessions, tz) {
     }
   }
 
-  for (const s of groupedSessions) {
+  for (const s of rawSessions) {
     if (!s.active_by_day) continue;
     for (const [dayKey, seconds] of Object.entries(s.active_by_day)) {
       addElapsedToDay(dayMap, dayKey, s, seconds || 0);

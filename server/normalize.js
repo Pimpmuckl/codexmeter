@@ -86,9 +86,19 @@ export function deriveAgentRole(agentRole, rawSource, title = null) {
 }
 
 export function isReviewTaskTitle(title) {
-  return typeof title === 'string' && (
-    title.startsWith('Review the code changes against the base branch ') ||
-    title.startsWith('You are reviewing a manually supplied diff artifact.')
+  if (typeof title !== 'string') return false;
+  const value = title.trim().toLowerCase();
+  return (
+    value.startsWith('review the code changes against the base branch ') ||
+    value.startsWith('you are reviewing a manually supplied diff artifact.') ||
+    value.startsWith('brief review for commit range ') ||
+    value.startsWith('independent brief review ') ||
+    value.startsWith('tight-scope integration review ') ||
+    value.startsWith('pr-scope review ') ||
+    value.startsWith('independent second-round pr review ') ||
+    value.startsWith('second independent pr-scope review ') ||
+    value.startsWith('implementation-review preflight ') ||
+    value.startsWith('implementation-review postflight ')
   );
 }
 

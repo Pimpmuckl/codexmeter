@@ -148,7 +148,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       queueLivePatch(state, bootstrapPatch);
     }
 
-    const candidates = sessions
+    const candidates = filterVisibleSessions(sessions)
       .filter(s => s.rollout_path)
       .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
 

@@ -18,6 +18,22 @@ test('review task title falls back to review family when source is plain cli', (
   assert.equal(classifyAgentFamily(agentRole), 'review');
 });
 
+test('broader review task titles still classify as review', () => {
+  const titles = [
+    'Brief review for commit range abc123..def456 in /home/jonat/code/demo.',
+    'Independent brief review of current HEAD of codex/demo in /home/jonat/code/demo.',
+    'Tight-scope integration review for /home/jonat/code/demo current diff.',
+    'PR-scope review for /home/jonat/code/demo on branch feat/demo.',
+    'Implementation-review preflight for /home/jonat/code/demo.',
+  ];
+
+  for (const title of titles) {
+    const agentRole = deriveAgentRole(null, 'cli', title);
+    assert.equal(agentRole, 'review');
+    assert.equal(classifyAgentFamily(agentRole), 'review');
+  }
+});
+
 test('review exec and cli launcher sessions are suppressed while real review sessions remain', () => {
   const launcher = {
     source_raw: 'exec',
