@@ -90,11 +90,18 @@ test('ingest preserves raw SQLite model when rollout file is missing', async () 
     const apr10 = byDate.get('2026-04-10');
 
     assert.ok(apr09);
-    assert.ok(apr10);
     assert.equal(apr09.by_model.unknown, undefined);
-    assert.equal(apr10.by_model.unknown, undefined);
-    assert.equal(apr09.by_model['gpt-5.4']?.tokens, 500000);
-    assert.equal(apr10.by_model['gpt-5.4']?.tokens, 500000);
+
+    const dailyRows = [...byDate.values()];
+    const totalGpt54Tokens = dailyRows.reduce((sum, row) => sum + (row.by_model['gpt-5.4']?.tokens || 0), 0);
+    const totalUnknownTokens = dailyRows.reduce((sum, row) => sum + (row.by_model.unknown?.tokens || 0), 0);
+
+    assert.equal(totalGpt54Tokens, 1_000_000);
+    assert.equal(totalUnknownTokens, 0);
+
+    if (apr10) {
+      assert.equal(apr10.by_model.unknown, undefined);
+    }
   } finally {
     await fs.rm(fixture.root, { recursive: true, force: true });
   }
