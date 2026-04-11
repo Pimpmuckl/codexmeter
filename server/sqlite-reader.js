@@ -20,7 +20,7 @@ export function readThreads(codexHome, onProgress) {
     const stmt = db.prepare(`
       SELECT
         id, rollout_path, created_at, updated_at,
-        source, model_provider, cwd, title,
+        source, model_provider, model, reasoning_effort, cwd, title,
         tokens_used, agent_nickname, agent_role,
         cli_version, git_branch, git_origin_url
       FROM threads
@@ -37,6 +37,8 @@ export function readThreads(codexHome, onProgress) {
         updated_at: row.updated_at,
         source_raw: row.source,
         model_provider: row.model_provider,
+        model_name: row.model || null,
+        reasoning_effort: row.reasoning_effort || null,
         cwd_raw: row.cwd,
         title: row.title ? row.title.slice(0, 200) : '',
         tokens_used: row.tokens_used || 0,

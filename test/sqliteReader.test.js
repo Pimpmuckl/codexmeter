@@ -17,6 +17,8 @@ test('sqlite reader opens smoke snapshot and reads thread rows', async () => {
     assert.ok(rows.some((row) => row.thread_id === 'ci-smoke-thread-1'));
     assert.ok(rows.some((row) => row.title === 'CI smoke session 1'));
     assert.ok(rows.some((row) => row.agent_role === 'generic'));
+    assert.ok(rows.some((row) => row.model_name === 'gpt-5.4'));
+    assert.ok(rows.some((row) => row.reasoning_effort === 'medium'));
     assert.ok(progressEvents.length >= 1);
     assert.equal(progressEvents.at(-1)?.total, rows.length);
     assert.equal(progressEvents.at(-1)?.read, rows.length);
