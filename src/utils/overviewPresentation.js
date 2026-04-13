@@ -54,6 +54,24 @@ function buildDailyPresentation(daily, range) {
   return { dates: visibleDates, series };
 }
 
+function getVisibleDailyRows(daily, range) {
+  const dailyArr = Array.isArray(daily?.data) ? daily.data : (Array.isArray(daily) ? daily : []);
+  if (!dailyArr.length) return [];
+
+  const visibleDates = new Set(getZoomSlice(range, dailyArr.map((row) => row.date)));
+  return dailyArr.filter((row) => visibleDates.has(row.date));
+}
+
+function summarizeVisibleDailyRows(daily, range) {
+  const rows = getVisibleDailyRows(daily, range);
+  return {
+    tokens: rows.reduce((sum, row) => sum + clampNumber(row?.tokens), 0),
+    elapsed: rows.reduce((sum, row) => sum + clampNumber(row?.elapsed_seconds), 0),
+    cost: rows.reduce((sum, row) => sum + clampNumber(row?.cost), 0),
+    days: rows.length || 1,
+  };
+}
+
 function buildHeatmapPresentation(heatmap) {
   const entries = heatmap?.data && typeof heatmap.data === 'object' ? heatmap.data : {};
   const next = {};
@@ -101,23 +119,25 @@ export function buildOverviewPresentationTarget({ overview, heatmap, daily, fami
   const fallbackPriced = clampNumber(coverage.priced_fallback);
   const unpriced = clampNumber(coverage.unpriced ?? Math.max(threadRows - priced, 0));
   const dateRange = d.date_range;
-  const days = dateRange?.from != null && dateRange?.to != null
+  const overviewDays = dateRange?.from != null && dateRange?.to != null
     ? Math.max(1, Math.ceil((dateRange.to - dateRange.from) / 86400))
     : 1;
+  const visibleDailySummary = summarizeVisibleDailyRows(daily, range);
+  const useVisibleDailySummary = range === 'd7' || range === 'd30';
 
   return {
     ready: true,
     stats: {
-      tokens: clampNumber(d.total_tokens),
-      elapsed: clampNumber(d.total_elapsed_seconds),
-      cost: clampNumber(d.total_cost),
+      tokens: useVisibleDailySummary ? visibleDailySummary.tokens : clampNumber(d.total_tokens),
+      elapsed: useVisibleDailySummary ? visibleDailySummary.elapsed : clampNumber(d.total_elapsed_seconds),
+      cost: useVisibleDailySummary ? visibleDailySummary.cost : clampNumber(d.total_cost),
       sessions: rootSessions,
       enriched: clampNumber(coverage.enriched),
       priced,
       exactPriced,
       fallbackPriced,
       unpriced,
-      days,
+      days: useVisibleDailySummary ? visibleDailySummary.days : overviewDays,
     },
     topRepos: normalizeMetricRows(pickRangeData(repos, range).slice(0, 6), 'repo_label', 'repo_label'),
     topFamilies: normalizeMetricRows(pickRangeData(families, range), 'family', 'family'),
