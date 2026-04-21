@@ -16,6 +16,7 @@ const REPO_PALETTE = [
 
 // Curated colors for common models (consistent across machines)
 const MODEL_COLORS = {
+  'gpt-5.5':              '#ff8a65',
   'gpt-5.4':              '#f472b6',
   'gpt-5-mini':           '#fb7185',
   'gpt-5.4-mini':         '#fb7185',

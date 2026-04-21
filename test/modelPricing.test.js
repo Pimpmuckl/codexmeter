@@ -1,7 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initPricing, calculateCostFromUsage, getModelPricing, CATALOG_VERSION } from '../server/cost-catalog.js';
+import { initPricing, calculateCostFromUsage, getModelPricing, priceSession, CATALOG_VERSION } from '../server/cost-catalog.js';
 import { normalizeModelName } from '../server/normalize.js';
+
+test('gpt-5.5 is recognized as a canonical model name and remains intentionally unpriced until catalog data exists', async () => {
+  await initPricing();
+
+  assert.equal(normalizeModelName('gpt-5.5'), 'gpt-5.5');
+
+  assert.equal(getModelPricing('gpt-5.5'), null);
+  assert.deepEqual(priceSession('gpt-5.5', {
+    totalTokens: 1_000_000,
+    usageBuckets: {
+      input_tokens: 700_000,
+      cached_input_tokens: 500_000,
+      output_tokens: 150_000,
+    },
+  }), {
+    cost: null,
+    source: 'unpriced',
+  });
+});
 
 test('gpt-5 mini and gpt-5.4 mini remain distinct canonical models with matching pricing', async () => {
   await initPricing();
