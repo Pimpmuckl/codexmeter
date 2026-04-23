@@ -126,14 +126,29 @@ const MODEL_ALIASES = {
   'codex-mini-latest': 'o4-mini',
   'gpt 5.5': 'gpt-5.5',
   'gpt-5.5': 'gpt-5.5',
+  'gpt 5 mini': 'gpt-5-mini',
   'gpt-5 mini': 'gpt-5-mini',
+  'gpt 5.4 mini': 'gpt-5.4-mini',
   'gpt-5.4 mini': 'gpt-5.4-mini',
+  'gpt 5 nano': 'gpt-5-nano',
   'gpt-5 nano': 'gpt-5-nano',
+  'gpt 5.4 nano': 'gpt-5.4-nano',
   'gpt-5.4 nano': 'gpt-5.4-nano',
 };
 
+const MODEL_HYPHEN_CHARS = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g;
+
+function normalizeModelLookupKey(rawModel) {
+  return String(rawModel)
+    .normalize('NFKC')
+    .replace(MODEL_HYPHEN_CHARS, '-')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 export function normalizeModelName(rawModel) {
   if (!rawModel) return null;
-  const lower = rawModel.toLowerCase().trim();
-  return MODEL_ALIASES[lower] || lower;
+  const lookup = normalizeModelLookupKey(rawModel);
+  return MODEL_ALIASES[lookup] || lookup;
 }

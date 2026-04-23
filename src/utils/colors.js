@@ -16,8 +16,8 @@ const REPO_PALETTE = [
 
 // Curated colors for common models (consistent across machines)
 const MODEL_COLORS = {
-  'gpt-5.5':              '#cf5a43',
-  'gpt-5.4':              '#f472b6',
+  'gpt-5.5':              '#22c790',
+  'gpt-5.4':              '#fa4141',
   'gpt-5-mini':           '#fb7185',
   'gpt-5.4-mini':         '#fb7185',
   'gpt-5-nano':           '#fda4af',
@@ -40,6 +40,22 @@ const MODEL_COLORS = {
   'gpt-3.5-turbo':        '#84cc16',
   'unknown':              '#475569',
 };
+
+const MODEL_COLOR_ALIASES = {
+  'codex-mini-latest': 'o4-mini',
+  'gpt 5.5': 'gpt-5.5',
+  'gpt-5.5': 'gpt-5.5',
+  'gpt 5 mini': 'gpt-5-mini',
+  'gpt-5 mini': 'gpt-5-mini',
+  'gpt 5.4 mini': 'gpt-5.4-mini',
+  'gpt-5.4 mini': 'gpt-5.4-mini',
+  'gpt 5 nano': 'gpt-5-nano',
+  'gpt-5 nano': 'gpt-5-nano',
+  'gpt 5.4 nano': 'gpt-5.4-nano',
+  'gpt-5.4 nano': 'gpt-5.4-nano',
+};
+
+const MODEL_HYPHEN_CHARS = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g;
 
 const FAMILY_COLORS = {
   review:      '#06b6d4',
@@ -98,9 +114,21 @@ function hslToHex(h, s, l) {
   return '#' + toHex(r) + toHex(g) + toHex(b);
 }
 
+function normalizeModelColorKey(modelName) {
+  if (!modelName) return '';
+  const lookup = String(modelName)
+    .normalize('NFKC')
+    .replace(MODEL_HYPHEN_CHARS, '-')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+  return MODEL_COLOR_ALIASES[lookup] || lookup;
+}
+
 export function getModelColor(modelName) {
-  if (MODEL_COLORS[modelName]) return MODEL_COLORS[modelName];
-  const h = hashStr(modelName) % 300;
+  const key = normalizeModelColorKey(modelName);
+  if (MODEL_COLORS[key]) return MODEL_COLORS[key];
+  const h = hashStr(key || String(modelName || 'unknown')) % 300;
   return hslToHex(h, 72, 62);
 }
 
