@@ -77,7 +77,7 @@ export function getModelPricing(modelName) {
   return getPricing()[modelName] || null;
 }
 
-export const CATALOG_VERSION = '2026-03-17';
+export const CATALOG_VERSION = '2026-04-23';
 export const CACHE_ASSUMPTIONS = {
   input_fraction: INPUT_FRACTION,
   output_fraction: OUTPUT_FRACTION,
