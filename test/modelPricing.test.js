@@ -1,7 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initPricing, calculateCostFromUsage, getModelPricing, CATALOG_VERSION } from '../server/cost-catalog.js';
+import { initPricing, calculateCostFromUsage, getModelPricing, priceSession, CATALOG_VERSION } from '../server/cost-catalog.js';
 import { normalizeModelName } from '../server/normalize.js';
+
+test('gpt-5.5 is recognized as a canonical model name with pricing at exactly 2x gpt-5.4', async () => {
+  await initPricing();
+
+  assert.equal(normalizeModelName('gpt-5.5'), 'gpt-5.5');
+
+  assert.deepEqual(getModelPricing('gpt-5.5'), {
+    input: 5,
+    output: 30,
+    cached_input: 0.5,
+  });
+  assert.deepEqual(getModelPricing('gpt-5.4'), {
+    input: 2.5,
+    output: 15,
+    cached_input: 0.25,
+  });
+  assert.deepEqual(priceSession('gpt-5.5', {
+    totalTokens: 1_000_000,
+    usageBuckets: {
+      input_tokens: 700_000,
+      cached_input_tokens: 500_000,
+      output_tokens: 150_000,
+    },
+  }), {
+    cost: 5.75,
+    source: 'exact',
+  });
+});
 
 test('gpt-5 mini and gpt-5.4 mini remain distinct canonical models with matching pricing', async () => {
   await initPricing();
@@ -35,7 +63,7 @@ test('gpt-5 mini and gpt-5.4 mini remain distinct canonical models with matching
 
   assert.equal(cost, 1.245);
   assert.equal(cost54, 1.245);
-  assert.equal(CATALOG_VERSION, '2026-03-17');
+  assert.equal(CATALOG_VERSION, '2026-04-23');
 });
 
 test('gpt-5 nano and gpt-5.4 nano remain distinct canonical models with matching pricing', async () => {
@@ -71,7 +99,7 @@ test('gpt-5 nano and gpt-5.4 nano remain distinct canonical models with matching
 
   assert.equal(cost, 0.189);
   assert.equal(cost54, 0.189);
-  assert.equal(CATALOG_VERSION, '2026-03-17');
+  assert.equal(CATALOG_VERSION, '2026-04-23');
 });
 
 test('gpt-5.2 remains distinct from gpt-5.2-codex', async () => {
