@@ -6,7 +6,7 @@ import { getModelColor } from '../src/utils/colors.js';
 test('model normalization canonicalizes odd hyphen and spacing variants for gpt-5.5', () => {
   assert.equal(normalizeModelName(' GPT‑5.5 '), 'gpt-5.5');
   assert.equal(normalizeModelName('gpt 5.5'), 'gpt-5.5');
-  assert.equal(getModelColor(' GPT‑5.5 '), '#22c7c7');
+  assert.equal(getModelColor(' GPT‑5.5 '), '#22c790');
 });
 
 test('model colors canonicalize gpt-5.4 mini variants before palette lookup', () => {

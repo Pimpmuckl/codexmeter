@@ -99,6 +99,70 @@ function buildRenderData({ replayEasing = 'cubicIn', tailEasing = 'cubicOut' } =
   };
 }
 
+function buildSettledEnvelope() {
+  return {
+    overview: {
+      data: {
+        total: buildRangeOverview(150, 3),
+        d7: buildRangeOverview(150, 3),
+        d30: buildRangeOverview(150, 3),
+      },
+    },
+    repos: {
+      data: {
+        total: [{ repo_label: 'nextide-web', tokens: 150 }],
+        d7: [{ repo_label: 'nextide-web', tokens: 150 }],
+        d30: [{ repo_label: 'nextide-web', tokens: 150 }],
+      },
+    },
+    models: {
+      data: {
+        total: [
+          { model_name: 'gpt-5.4', tokens: 100 },
+          { model_name: 'gpt-5.5', tokens: 50 },
+        ],
+        d7: [
+          { model_name: 'gpt-5.4', tokens: 100 },
+          { model_name: 'gpt-5.5', tokens: 50 },
+        ],
+        d30: [
+          { model_name: 'gpt-5.4', tokens: 100 },
+          { model_name: 'gpt-5.5', tokens: 50 },
+        ],
+      },
+    },
+    families: {
+      data: {
+        total: [{ family: 'generic', tokens: 150 }],
+        d7: [{ family: 'generic', tokens: 150 }],
+        d30: [{ family: 'generic', tokens: 150 }],
+      },
+    },
+    daily: {
+      data: [{
+        date: '2026-03-10',
+        tokens: 150,
+        elapsed_seconds: 15,
+        cost: 0.15,
+        sessions: 3,
+        by_model: {
+          'gpt-5.4': { tokens: 100 },
+          'gpt-5.5': { tokens: 50 },
+        },
+      }],
+    },
+    heatmap: {
+      data: {
+        '2026-03-10': {
+          tokens: 150,
+          elapsed: 15,
+          cost: 0.15,
+        },
+      },
+    },
+  };
+}
+
 test('replay easing knob changes replay source progress', () => {
   const linearSim = createExportSimulation(buildRenderData({ replayEasing: 'linear' }));
   const cubicSim = createExportSimulation(buildRenderData({ replayEasing: 'cubicIn' }));
@@ -124,4 +188,19 @@ test('tail easing knob changes late-presentation progress', () => {
     cubicOutFrame.presentation.stats.tokens > linearFrame.presentation.stats.tokens,
     'cubicOut tail easing should move farther through the tail than linear at the same wall time'
   );
+});
+
+test('final export frame uses settled daily model stacks as authoritative truth', () => {
+  const sim = createExportSimulation({
+    ...buildRenderData(),
+    settledEnvelope: buildSettledEnvelope(),
+  });
+
+  const frame = advanceExportSimulation(sim, sim.totalDurationMs);
+  const dailySeries = new Map(frame.presentation.daily.series.map((series) => [series.key, series.data[0]]));
+
+  assert.equal(frame.phase, 'final_hold');
+  assert.equal(frame.presentation.stats.tokens, 150);
+  assert.equal(dailySeries.get('gpt-5.4'), 100);
+  assert.equal(dailySeries.get('gpt-5.5'), 50);
 });

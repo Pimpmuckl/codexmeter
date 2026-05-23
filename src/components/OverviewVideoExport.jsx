@@ -63,7 +63,8 @@ export default function OverviewVideoExport({ jobId }) {
       const statValues = Array.from(document.querySelectorAll('.stat-card .stat-value'));
       const chartCanvases = Array.from(document.querySelectorAll('canvas'));
       const hasStats = statValues.length >= 4 && statValues.every((node) => String(node.textContent || '').trim().length > 0);
-      const hasCharts = chartCanvases.length >= 4 && chartCanvases.every((node) => {
+      const hasDailySpark = Boolean(document.querySelector('.overview-daily-spark-chart, .overview-daily-spark-empty'));
+      const hasCharts = chartCanvases.length >= 3 && hasDailySpark && chartCanvases.every((node) => {
         const rect = node.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
       });

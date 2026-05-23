@@ -33,7 +33,8 @@ export function createExportSimulation(renderData) {
   const tailSourceStartMs = Math.max(sourceStartMs, sourceDurationMs - tailSourceDurationMs);
   const replayEasing = renderData.replayEasing || 'cubicInOut';
   const tailEasing = renderData.tailEasing || 'cubicInOut';
-  const finalPresentation = keyframes[keyframes.length - 1]?.presentation || initialPresentation;
+  const settledPresentation = buildSettledPresentation(renderData);
+  const finalPresentation = settledPresentation || keyframes[keyframes.length - 1]?.presentation || initialPresentation;
   const tailStartPresentation = samplePresentationFromKeyframes(keyframes, tailSourceStartMs);
   const lateReplayDurationMs = Math.min(3600, Math.max(1800, Math.round(replayDurationMs * 0.32)));
   const lateReplayStartMs = Math.max(
@@ -314,6 +315,21 @@ function buildPresentationKeyframes(renderData, bootstrapLiveState, events) {
   }
 
   return keyframes;
+}
+
+function buildSettledPresentation(renderData) {
+  const settled = renderData.settledEnvelope;
+  if (!settled?.overview?.data) return null;
+
+  return buildOverviewPresentationTarget({
+    overview: settled.overview,
+    heatmap: settled.heatmap || { data: {} },
+    daily: settled.daily || { data: [] },
+    families: settled.families || { data: { total: [], d7: [], d30: [] } },
+    repos: settled.repos || { data: { total: [], d7: [], d30: [] } },
+    models: settled.models || { data: { total: [], d7: [], d30: [] } },
+    range: 'total',
+  });
 }
 
 function isReplayDataEvent(event) {
