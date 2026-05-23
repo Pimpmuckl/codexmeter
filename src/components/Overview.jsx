@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect, useRef, useMemo } from 'react';
+import React, { memo, useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import ReactEChartsCore from '../utils/echartsReact';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
@@ -16,8 +16,9 @@ import {
 } from '../utils/animationsDefault';
 import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
 import { useDailyStackPresentationTween } from '../hooks/useDailyStackPresentationTween';
-import { buildOverviewPresentationTarget } from '../utils/overviewPresentation';
+import { buildDailyCursorPresentationTarget, buildOverviewPresentationTarget, getZoomSlice } from '../utils/overviewPresentation';
 import { debugLive, summarizeDailyData, summarizeHeatmapData } from '../utils/liveDebug';
+import { buildDailyStackPresentation } from '../utils/dailyStack';
 
 echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, CanvasRenderer]);
 
@@ -64,41 +65,39 @@ function getOverviewDailyBarSizing(count) {
 }
 
 function buildFullDailySparkPresentation(daily) {
-  const dailyArr = Array.isArray(daily?.data) ? daily.data : (Array.isArray(daily) ? daily : []);
-  if (!dailyArr.length) return { dates: [], series: [] };
-
-  const dates = dailyArr.map((row) => row.date);
-  const rowByDate = new Map(dailyArr.map((row) => [row.date, row]));
-  const modelSet = new Set();
-
-  for (const row of dailyArr) {
-    for (const key of Object.keys(row?.by_model || {})) {
-      modelSet.add(key);
-    }
-  }
-
-  const series = [...modelSet].map((model) => ({
-    key: model,
-    label: model,
-    data: dates.map((date) => {
-      const value = rowByDate.get(date)?.by_model?.[model]?.tokens;
-      return Number.isFinite(value) ? value : 0;
-    }),
-  }));
-
+  const { dates, series } = buildDailyStackPresentation(daily, { split: 'model', metric: 'tokens' });
   return { dates, series };
 }
 
-function resolveDailyRevealTargetIndex(dates, isIngestActive) {
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function resolveDailyRevealTargetIndex(dates, isIngestActive, ingestProgress = 0) {
   if (!dates?.length) return 0;
   if (!isIngestActive) return dates.length - 1;
-  return dates.length - 1;
+
+  const startIndex = resolveDailyRevealStartIndex(dates, isIngestActive);
+  const lastIndex = dates.length - 1;
+  const normalizedProgress = clamp01(((ingestProgress || 0) - 0.08) / 0.92);
+  const easedProgress = Math.pow(normalizedProgress, 0.82);
+  const progressTarget = startIndex + (lastIndex - startIndex) * easedProgress;
+  const elasticLookaheadDays = 32;
+  return Math.max(startIndex, Math.min(lastIndex, Math.floor(progressTarget + elasticLookaheadDays)));
 }
 
 function resolveDailyRevealStartIndex(dates, isIngestActive) {
   if (!dates?.length) return 0;
   if (!isIngestActive) return dates.length - 1;
   return Math.min(dates.length - 1, 6);
+}
+
+function resolveEffectiveDailyTargetIndex(rawTargetIndex, cursor, datesLength, isIngestActive) {
+  if (!isIngestActive) return rawTargetIndex;
+  const lastIndex = Math.max(0, (datesLength || 1) - 1);
+  const current = Math.max(0, Math.min(lastIndex, Number.isFinite(cursor) ? cursor : 0));
+  if (current >= lastIndex - 0.01) return lastIndex;
+  return Math.max(rawTargetIndex, Math.min(lastIndex, current + 1.25));
 }
 
 function sliceDailyAtCursor(daily, cursor) {
@@ -119,6 +118,33 @@ function sliceDailyAtCursor(daily, cursor) {
     }),
   }));
   return { dates, series };
+}
+
+function remapCursorIndexByDate(previousDates, nextDates, cursor) {
+  if (!previousDates?.length || !nextDates?.length) {
+    return Math.max(0, Math.min(Math.max((nextDates?.length || 1) - 1, 0), cursor || 0));
+  }
+
+  const previousLastIndex = previousDates.length - 1;
+  const clamped = Math.max(0, Math.min(previousLastIndex, Number.isFinite(cursor) ? cursor : previousLastIndex));
+  const floorIndex = Math.floor(clamped);
+  const ceilIndex = Math.min(previousLastIndex, Math.ceil(clamped));
+  const fraction = clamped - floorIndex;
+  const nextIndexByDate = new Map(nextDates.map((date, index) => [date, index]));
+  const floorNextIndex = nextIndexByDate.get(previousDates[floorIndex]);
+
+  if (floorNextIndex == null) {
+    return Math.max(0, Math.min(nextDates.length - 1, clamped));
+  }
+
+  if (ceilIndex === floorIndex) return floorNextIndex;
+
+  const ceilNextIndex = nextIndexByDate.get(previousDates[ceilIndex]);
+  if (ceilNextIndex == null) {
+    return Math.max(0, Math.min(nextDates.length - 1, floorNextIndex + fraction));
+  }
+
+  return floorNextIndex + ((ceilNextIndex - floorNextIndex) * fraction);
 }
 
 function filterHeatmapByMaxDate(heatmapData, maxDate) {
@@ -169,7 +195,7 @@ function mergeDailyPresentationsByDate(previousDaily, nextDaily) {
   return { dates, series };
 }
 
-function useElasticDailyPresentation(sourceDaily, { isIngestActive = false } = {}) {
+function useElasticDailyPresentation(sourceDaily, { ingestProgress = 0, isIngestActive = false } = {}) {
   const stableSourceRef = useRef({ dates: [], series: [] });
   const stableDaily = useMemo(
     () => {
@@ -183,23 +209,51 @@ function useElasticDailyPresentation(sourceDaily, { isIngestActive = false } = {
     [sourceDaily, isIngestActive]
   );
   const rawTargetIndex = useMemo(
-    () => resolveDailyRevealTargetIndex(stableDaily?.dates || [], isIngestActive),
-    [stableDaily?.dates, isIngestActive]
+    () => resolveDailyRevealTargetIndex(stableDaily?.dates || [], isIngestActive, ingestProgress),
+    [stableDaily?.dates, ingestProgress, isIngestActive]
   );
-  const targetIndex = rawTargetIndex;
   const [cursor, setCursor] = useState(() => resolveDailyRevealStartIndex(stableDaily?.dates || [], isIngestActive));
+  const targetIndex = resolveEffectiveDailyTargetIndex(rawTargetIndex, cursor, stableDaily?.dates?.length || 0, isIngestActive);
+  const waitingForDailyData = Boolean(isIngestActive && (stableDaily?.dates?.length || 0) > 0 && cursor >= (stableDaily.dates.length - 1) - 0.01);
+  const [speedDaysPerSecond, setSpeedDaysPerSecond] = useState(0);
   const cursorRef = useRef(cursor);
+  const speedRef = useRef(0);
+  const datesRef = useRef(stableDaily?.dates || []);
   const frameRef = useRef(0);
   const lastFrameRef = useRef(0);
   cursorRef.current = cursor;
 
+  const commitSpeedDaysPerSecond = (nextSpeed) => {
+    const roundedSpeed = Math.round(Math.max(0, nextSpeed || 0) * 10) / 10;
+    if (Math.abs(speedRef.current - roundedSpeed) < 0.05) return;
+    speedRef.current = roundedSpeed;
+    setSpeedDaysPerSecond(roundedSpeed);
+  };
+
+  useLayoutEffect(() => {
+    const nextDates = stableDaily?.dates || [];
+    const previousDates = datesRef.current || [];
+    if (previousDates === nextDates) return;
+    datesRef.current = nextDates;
+    if (!isIngestActive) return;
+
+    const remappedCursor = remapCursorIndexByDate(previousDates, nextDates, cursorRef.current);
+    if (Math.abs(remappedCursor - cursorRef.current) < 0.001) return;
+    cursorRef.current = remappedCursor;
+    setCursor(remappedCursor);
+  }, [stableDaily?.dates, isIngestActive]);
+
   useEffect(() => {
     const datesLength = stableDaily?.dates?.length || 0;
-    if (!datesLength) return undefined;
+    if (!datesLength) {
+      commitSpeedDaysPerSecond(0);
+      return undefined;
+    }
 
     if (!isIngestActive) {
       cursorRef.current = targetIndex;
       setCursor(targetIndex);
+      commitSpeedDaysPerSecond(0);
       return undefined;
     }
 
@@ -213,15 +267,19 @@ function useElasticDailyPresentation(sourceDaily, { isIngestActive = false } = {
       lastFrameRef.current = now;
 
       const current = cursorRef.current;
-      const distance = targetIndex - current;
+      const effectiveTargetIndex = resolveEffectiveDailyTargetIndex(rawTargetIndex, current, datesLength, isIngestActive);
+      const distance = effectiveTargetIndex - current;
       if (Math.abs(distance) <= 0.01) {
-        cursorRef.current = targetIndex;
-        setCursor(targetIndex);
+        cursorRef.current = effectiveTargetIndex;
+        setCursor(effectiveTargetIndex);
+        commitSpeedDaysPerSecond(0);
         frameRef.current = 0;
         return;
       }
 
-      const speedDaysPerSecond = Math.min(2.1, Math.max(0.8, Math.abs(distance) * 0.9));
+      const lagDays = Math.abs(distance);
+      const speedDaysPerSecond = Math.min(4.2, Math.max(0.65, 1.15 + Math.max(0, lagDays - 8) * 0.11));
+      commitSpeedDaysPerSecond(speedDaysPerSecond);
       const step = Math.sign(distance) * Math.min(Math.abs(distance), (speedDaysPerSecond * dt) / 1000);
       const next = current + step;
       cursorRef.current = next;
@@ -234,7 +292,7 @@ function useElasticDailyPresentation(sourceDaily, { isIngestActive = false } = {
       cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
     };
-  }, [stableDaily?.dates?.length, targetIndex, isIngestActive]);
+  }, [stableDaily?.dates?.length, rawTargetIndex, isIngestActive]);
 
   useEffect(() => () => {
     cancelAnimationFrame(frameRef.current);
@@ -246,7 +304,7 @@ function useElasticDailyPresentation(sourceDaily, { isIngestActive = false } = {
     [stableDaily, cursor]
   );
 
-  return { daily, cursor, rawTargetIndex, sourceDaily: stableDaily, targetIndex };
+  return { daily, cursor, rawTargetIndex, sourceDaily: stableDaily, speedDaysPerSecond, targetIndex, waitingForDailyData };
 }
 
 function getSparkZoomWindow(range, count, cursor = null, cursorDriven = false) {
@@ -406,7 +464,7 @@ function DailySpark({
   const wasCursorDrivenZoomRef = useRef(cursorDrivenZoom);
   const zoomWindowRef = useRef(zoomWindow);
   const zoomAnimRafRef = useRef(0);
-  const animatedDaily = useDailyStackPresentationTween(displayDaily, !exportMode && !exportPlayback, 'overview-daily-spark');
+  const animatedDaily = useDailyStackPresentationTween(displayDaily, cursorDrivenZoom, 'overview-daily-spark');
   const activeZoomWindow = cursorDrivenZoom
     ? cursorZoomWindow
     : (wasCursorDrivenZoomRef.current ? lastCursorZoomWindowRef.current : zoomWindow);
@@ -436,6 +494,7 @@ function DailySpark({
   const { startValue, endValue } = activeZoomWindow;
   const visibleDateCount = Math.max(1, (endValue - startValue + 1) || displayDaily.dates.length);
   const { barWidth, barMaxWidth } = getOverviewDailyBarSizing(visibleDateCount);
+  const useContinuousXAxis = cursorDrivenZoom;
   const xMin = Math.max(-0.5, startValue - 0.5);
   const xMax = Math.max(xMin + 1, endValue + 0.5);
   const dateAtIndex = (index) => displayDaily.dates[Math.max(0, Math.min(displayDaily.dates.length - 1, Math.round(index)))];
@@ -465,6 +524,7 @@ function DailySpark({
       cursor: Number(resolvedElasticDaily.cursor.toFixed(2)),
       targetIndex: resolvedElasticDaily.targetIndex,
       rawTargetIndex: resolvedElasticDaily.rawTargetIndex,
+      lagDays: Number((resolvedElasticDaily.targetIndex - resolvedElasticDaily.cursor).toFixed(2)),
       source: sourceSummary,
       presentationSource: summarizeDailyData(resolvedElasticDaily.sourceDaily, currentDateBucket),
       display: displaySummary,
@@ -502,13 +562,24 @@ function DailySpark({
       },
     },
     grid: { left: 4, right: 4, top: 4, bottom: 4 },
-    xAxis: { type: 'value', min: xMin, max: xMax, show: false },
+    xAxis: useContinuousXAxis
+      ? { type: 'value', min: xMin, max: xMax, show: false }
+      : {
+        type: 'category',
+        data: animatedDaily.dates || displayDaily.dates,
+        min: Math.max(0, Math.floor(startValue)),
+        max: Math.max(0, Math.floor(endValue)),
+        show: false,
+      },
     yAxis: { type: 'value', show: false, scale: false, min: 0 },
     series: animatedDaily.series.map((series) => ({
+      id: `overview-daily-${series.key}`,
       name: series.label,
       type: 'bar',
       stack: 'total',
-      data: series.data.map((value, index) => [index, value]),
+      data: useContinuousXAxis
+        ? series.data.map((value, index) => [index, value])
+        : series.data,
       itemStyle: { color: getModelColor(series.key) },
       ...(barWidth ? { barWidth } : {}),
       barMaxWidth,
@@ -539,6 +610,7 @@ function DailySpark({
           theme="dark"
           lazyUpdate={false}
           notMerge={exportMode}
+          replaceMerge={['series']}
           onEvents={sparkEvents}
         />
       </div>
@@ -715,6 +787,7 @@ export function OverviewFrame({
   presentation,
   rawPresentation = null,
   fullDaily = null,
+  sourceDailyRows = null,
   range = 'total',
   ingestProgress = 0,
   isIngestActive = false,
@@ -723,6 +796,8 @@ export function OverviewFrame({
   exportPlayback = false,
   exportPhase = null,
   exportSeekMs = 0,
+  onDailyDebugStatsChange = null,
+  onPresentationDateRangeChange = null,
   onNavigateToDailyDay,
   onNavigateToRepo,
   onNavigateToModel,
@@ -740,10 +815,31 @@ export function OverviewFrame({
     : fullDaily;
   const dailySparkActive = !exportMode && !exportPlayback && isIngestActive;
   const elasticDaily = useElasticDailyPresentation(sparkSourceDaily, {
+    ingestProgress,
     isIngestActive: dailySparkActive,
   });
+  useEffect(() => {
+    onDailyDebugStatsChange?.(
+      dailySparkActive
+        ? {
+          speedDaysPerSecond: elasticDaily.speedDaysPerSecond,
+          waitingForDailyData: elasticDaily.waitingForDailyData,
+        }
+        : null
+    );
+  }, [dailySparkActive, elasticDaily.speedDaysPerSecond, elasticDaily.waitingForDailyData, onDailyDebugStatsChange]);
+  useEffect(() => () => onDailyDebugStatsChange?.(null), [onDailyDebugStatsChange]);
   const elasticDates = elasticDaily.daily?.dates || [];
   const presentationDateBucket = elasticDates[elasticDates.length - 1] || currentDateBucket;
+  const presentationRangeDates = getZoomSlice(range, elasticDates);
+  const presentationDateRange = {
+    from: presentationRangeDates[0] || presentationDateBucket,
+    to: presentationRangeDates[presentationRangeDates.length - 1] || presentationDateBucket,
+  };
+  useEffect(() => {
+    onPresentationDateRangeChange?.(dailySparkActive ? presentationDateRange : null);
+  }, [dailySparkActive, onPresentationDateRangeChange, presentationDateRange.from, presentationDateRange.to]);
+  useEffect(() => () => onPresentationDateRangeChange?.(null), [onPresentationDateRangeChange]);
   const baseHeatmapPresentation = (isIngestActive && rawPresentation?.heatmap)
     ? rawPresentation.heatmap
     : presentation.heatmap;
@@ -753,25 +849,38 @@ export function OverviewFrame({
   const heatmapPresentation = isIngestActive && heatmapDateBucket && !exportPlayback
     ? filterHeatmapByMaxDate(baseHeatmapPresentation, heatmapDateBucket)
     : (baseHeatmapPresentation || {});
-  const { stats, topRepos, topFamilies, topModels } = presentation;
+  const summaryPresentation = useMemo(
+    () => (
+      dailySparkActive
+        ? buildDailyCursorPresentationTarget({
+          daily: sourceDailyRows,
+          range,
+          cursor: elasticDaily.cursor,
+          fallback: chartPresentation,
+        })
+        : chartPresentation
+    ),
+    [chartPresentation, dailySparkActive, elasticDaily.cursor, range, sourceDailyRows]
+  );
+  const { stats, topRepos, topFamilies, topModels } = summaryPresentation;
   const chartTopRepos = exportPlayback && exportPhase === 'replay'
     ? scaleMetricRows(
       buildOrderedMetricRows(rawPresentation?.topRepos || chartPresentation.topRepos || [], presentation.topRepos || chartPresentation.topRepos || []),
       exportChartIntroProgress
     )
-    : (chartPresentation.topRepos || []);
+    : (summaryPresentation.topRepos || []);
   const chartTopFamilies = exportPlayback && exportPhase === 'replay'
     ? scaleMetricRows(
       buildOrderedMetricRows(rawPresentation?.topFamilies || chartPresentation.topFamilies || [], presentation.topFamilies || chartPresentation.topFamilies || []),
       exportChartIntroProgress
     )
-    : (chartPresentation.topFamilies || []);
+    : (summaryPresentation.topFamilies || []);
   const chartTopModels = exportPlayback && exportPhase === 'replay'
     ? scaleMetricRows(
       buildOrderedMetricRows(rawPresentation?.topModels || chartPresentation.topModels || [], presentation.topModels || chartPresentation.topModels || []),
       exportChartIntroProgress
     )
-    : (chartPresentation.topModels || []);
+    : (summaryPresentation.topModels || []);
   const reversedRepos = [...chartTopRepos.slice(0, 6)].reverse();
   const maxRepoTokens = Math.max(...chartTopRepos.slice(0, 6).map(row => row.tokens || 0), 1);
   const orderedFamilies = [...chartTopFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
@@ -1076,6 +1185,8 @@ function Overview({
   isIngestActive = false,
   currentDateBucket = null,
   clockNowMs = null,
+  onDailyDebugStatsChange = null,
+  onPresentationDateRangeChange = null,
   onNavigateToDailyDay,
   onNavigateToRepo,
   onNavigateToModel,
@@ -1104,10 +1215,13 @@ function Overview({
       presentation={presentation}
       rawPresentation={rawPresentation}
       fullDaily={fullDaily}
+      sourceDailyRows={daily}
       range={range}
       ingestProgress={ingestProgress}
       isIngestActive={isIngestActive}
       currentDateBucket={currentDateBucket}
+      onDailyDebugStatsChange={onDailyDebugStatsChange}
+      onPresentationDateRangeChange={onPresentationDateRangeChange}
       onNavigateToDailyDay={onNavigateToDailyDay}
       onNavigateToRepo={onNavigateToRepo}
       onNavigateToModel={onNavigateToModel}
@@ -1128,6 +1242,8 @@ function areOverviewPropsEqual(prev, next) {
     && prev.isIngestActive === next.isIngestActive
     && prev.currentDateBucket === next.currentDateBucket
     && prev.clockNowMs === next.clockNowMs
+    && prev.onDailyDebugStatsChange === next.onDailyDebugStatsChange
+    && prev.onPresentationDateRangeChange === next.onPresentationDateRangeChange
     && prev.onNavigateToDailyDay === next.onNavigateToDailyDay
     && prev.onNavigateToRepo === next.onNavigateToRepo
     && prev.onNavigateToModel === next.onNavigateToModel;

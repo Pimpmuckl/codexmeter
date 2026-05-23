@@ -9,6 +9,7 @@ import { formatCompactNumber } from '../utils/formatters';
 import { ECHARTS_ANIMATION, ECHARTS_OVERVIEW_DAILY } from '../utils/animationsDefault';
 import { useDailyStackPresentationTween } from '../hooks/useDailyStackPresentationTween';
 import { buildBreakdownRows, buildDistributionOption } from './subcharts';
+import { buildDailyStackPresentation, getDailyRows } from '../utils/dailyStack';
 
 echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, TitleComponent, LegendComponent, DataZoomComponent, GraphicComponent, CanvasRenderer]);
 
@@ -421,44 +422,16 @@ const DailyMainChart = React.memo(function DailyMainChart({
   const visibleBarMinWidth = useMemo(() => getVisibleBarMinWidth(range, visibleDateCount), [range, visibleDateCount]);
   const visibleBarPercent = useMemo(() => getVisibleBarPercent(range, visibleDateCount), [range, visibleDateCount]);
 
-  const groups = useMemo(() => {
-    const set = new Set();
-    for (let i = 0; i < daily.length; i++) {
-      const d = daily[i];
-      if (!d) continue;
-      const src = split === 'model' ? d.by_model : (d.by_family || {});
-      for (const [k, v] of Object.entries(src)) {
-        if (!v) continue;
-        const value = metric === 'elapsed_seconds'
-          ? (v.elapsed_seconds || 0)
-          : metric === 'cost'
-            ? (v.cost || 0)
-            : (v.tokens || 0);
-        if (value > 0) set.add(k);
-      }
-    }
-    return [...set];
-  }, [daily, split, metric]);
-
-  const rawSeriesData = useMemo(() => groups.map((g) => {
-    return {
-      name: g,
-      values: daily.map((d) => {
-        const src = split === 'model' ? d.by_model : (d.by_family || {});
-        const v = src[g];
-        if (!v) return 0;
-        return metric === 'elapsed_seconds' ? v.elapsed_seconds || 0 : metric === 'cost' ? v.cost || 0 : v.tokens || 0;
-      }),
-    };
-  }), [groups, daily, split, metric]);
-
-  const dayTotals = useMemo(() => daily.map((_, j) => {
-    let sum = 0;
-    for (const s of rawSeriesData) {
-      sum += s.values[j] || 0;
-    }
-    return sum;
-  }), [daily, rawSeriesData]);
+  const dailyStack = useMemo(
+    () => buildDailyStackPresentation(daily, { split, metric }),
+    [daily, split, metric],
+  );
+  const groups = dailyStack.groups;
+  const rawSeriesData = useMemo(
+    () => dailyStack.series.map((series) => ({ name: series.key, values: series.data })),
+    [dailyStack.series],
+  );
+  const dayTotals = dailyStack.dayTotals;
   const maxVisibleDayTotal = useMemo(() => {
     if (!dayTotals.length || visibleWindow.endIdx < visibleWindow.startIdx) return 0;
     let maxVal = 0;
@@ -526,6 +499,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
         const cd = cumulativeData[seriesIdx];
         if (!cd) return null;
         return {
+          id: `daily-${split}-${g}`,
           name: g,
           type: 'line',
           stack: 'total',
@@ -542,6 +516,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
       const color = split === 'model' ? getModelColor(g) : getFamilyColor(g);
       const data = animatedByKey.get(g)?.data ?? dates.map(() => 0);
       return {
+        id: `daily-${split}-${g}`,
         name: g,
         type: 'bar',
         stack: 'total',
@@ -756,7 +731,7 @@ export default function DailyUsage({
 
   if (!data?.data?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
 
-  const daily = data.data;
+  const daily = useMemo(() => getDailyRows(data), [data]);
 
   useEffect(() => {
     if (!selectedDate && daily[0]) setSelectedDate(daily[daily.length - 1]?.date || daily[0]?.date);

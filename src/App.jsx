@@ -27,6 +27,11 @@ function dayFloor(ts) {
   return Math.floor(ts / 86400) * 86400;
 }
 
+function isoDayToTimestamp(day) {
+  const ms = Date.parse(`${day}T12:00:00Z`);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
 const PHASE_LABELS = {
   idle: 'Starting...',
   inventory: 'Reading threads',
@@ -72,6 +77,8 @@ export default function App() {
   const [dailyNavigateRequest, setDailyNavigateRequest] = useState(null);
   const [reposFocusRequest, setReposFocusRequest] = useState(null);
   const [modelsFocusRequest, setModelsFocusRequest] = useState(null);
+  const [dailyDebugStats, setDailyDebugStats] = useState(null);
+  const [overviewPresentationDateRange, setOverviewPresentationDateRange] = useState(null);
   const prevBackendCompleteRef = useRef(false);
   const displayDateAnimationRef = useRef(0);
   const lastAutoDownloadedExportIdRef = useRef(null);
@@ -508,6 +515,15 @@ export default function App() {
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
   const dateRange = d?.date_range;
+  const presentationFromTs = overviewIngestActive && overviewPresentationDateRange?.from
+    ? isoDayToTimestamp(overviewPresentationDateRange.from)
+    : null;
+  const presentationToTs = overviewIngestActive && overviewPresentationDateRange?.to
+    ? isoDayToTimestamp(overviewPresentationDateRange.to)
+    : null;
+  const navbarDateRange = dateRange && presentationToTs
+    ? { ...dateRange, from: presentationFromTs || dateRange.from, to: presentationToTs }
+    : dateRange;
 
   useEffect(() => {
     if (displayDateAnimationRef.current) {
@@ -515,20 +531,21 @@ export default function App() {
       displayDateAnimationRef.current = 0;
     }
 
-    if (!dateRange?.from || !dateRange?.to) {
+    if (!navbarDateRange?.from || !navbarDateRange?.to) {
       setDisplayDateRange(null);
       return undefined;
     }
 
     const nextRange = {
-      from: dayFloor(dateRange.from),
-      to: dayFloor(dateRange.to),
+      from: dayFloor(navbarDateRange.from),
+      to: dayFloor(navbarDateRange.to),
     };
 
     setDisplayDateRange((prev) => {
       if (
         !prev ||
         backendComplete ||
+        overviewIngestActive ||
         prev.from !== nextRange.from ||
         nextRange.to <= prev.to
       ) {
@@ -567,7 +584,7 @@ export default function App() {
         displayDateAnimationRef.current = 0;
       }
     };
-  }, [backendComplete, dateRange?.from, dateRange?.to]);
+  }, [backendComplete, navbarDateRange?.from, navbarDateRange?.to, overviewIngestActive]);
   const exportBusy = startingExport || ['queued', 'running'].includes(exportJob?.status);
   const exportNeedsPortableBrowser = !exportSupport?.available && exportSupport?.portable_download?.available;
   const exportDisabledReason = portableDownloadPending
@@ -651,10 +668,10 @@ export default function App() {
             ))}
           </div>
           <div className="navbar-meta">
-            {dateRange && (
+            {navbarDateRange && (
               <div className={`navbar-date-wrap ${!backendComplete ? 'navbar-date-wrap-dimmed' : ''}`}>
                 <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                  {fmtDate(displayDateRange?.from || dateRange.from)} — {fmtDate(displayDateRange?.to || dateRange.to)}
+                  {fmtDate(displayDateRange?.from || navbarDateRange.from)} — {fmtDate(displayDateRange?.to || navbarDateRange.to)}
                 </span>
                 <div className="range-toggle">
                   {RANGES.map(r => (
@@ -703,6 +720,8 @@ export default function App() {
               ingestProgress={overviewIngestProgress}
               isIngestActive={overviewIngestActive}
               currentDateBucket={progress?.current_date_bucket || null}
+              onDailyDebugStatsChange={setDailyDebugStats}
+              onPresentationDateRangeChange={setOverviewPresentationDateRange}
               onNavigateToDailyDay={handleNavigateToDailyDay}
               onNavigateToRepo={handleNavigateToRepo}
               onNavigateToModel={handleNavigateToModel}
@@ -734,6 +753,12 @@ export default function App() {
           )}
           {tab === 'Sessions' && <Sessions data={data.sessions} />}
         </div>
+        {overviewIngestActive && dailyDebugStats && (
+          <div className="app-footer-debug">
+            Daily Usage presentation: {dailyDebugStats.speedDaysPerSecond.toFixed(1)} days/s
+            {dailyDebugStats.waitingForDailyData ? ' (waiting for daily data)' : ''}
+          </div>
+        )}
         <div className="app-footer">Made with <span className="loading-heart">♥</span> by JJ</div>
       </div>
     </div>

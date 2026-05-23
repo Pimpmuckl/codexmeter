@@ -493,14 +493,7 @@ function serializeDailyEntry(value) {
 }
 
 function serializeDailySnapshotEntry(value) {
-  return {
-    tokens: Math.round(value?.tokens || 0),
-    cost: value?.cost || 0,
-    elapsed_seconds: Math.round(value?.elapsed_seconds || 0),
-    sessions: value?.sessions || 0,
-    by_model: deepRoundClone(value?.by_model || {}, ['tokens', 'cost', 'elapsed_seconds']),
-    approximate: true,
-  };
+  return serializeDailyEntry(value);
 }
 
 function serializeHeatmap(dayMap) {

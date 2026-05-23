@@ -1,3 +1,5 @@
+import { buildDailyStackPresentation, getDailyRows } from './dailyStack.js';
+
 function lerp(from, to, t) {
   return from + (to - from) * t;
 }
@@ -28,34 +30,19 @@ function normalizeMetricRows(rows, keyField, labelField) {
 }
 
 function buildDailyPresentation(daily, range) {
-  const dailyArr = Array.isArray(daily?.data) ? daily.data : (Array.isArray(daily) ? daily : []);
+  const dailyArr = getDailyRows(daily);
   if (!dailyArr.length) {
     return { dates: [], series: [] };
   }
 
   const allDates = dailyArr.map((row) => row.date);
   const visibleDates = getZoomSlice(range, allDates);
-  const rowByDate = new Map(dailyArr.map((row) => [row.date, row]));
-  const modelSet = new Set();
-
-  for (const date of visibleDates) {
-    const row = rowByDate.get(date);
-    for (const key of Object.keys(row?.by_model || {})) {
-      modelSet.add(key);
-    }
-  }
-
-  const series = [...modelSet].map((model) => ({
-    key: model,
-    label: model,
-    data: visibleDates.map((date) => clampNumber(rowByDate.get(date)?.by_model?.[model]?.tokens)),
-  }));
-
+  const { series } = buildDailyStackPresentation(daily, { split: 'model', metric: 'tokens', dates: visibleDates });
   return { dates: visibleDates, series };
 }
 
 function getVisibleDailyRows(daily, range) {
-  const dailyArr = Array.isArray(daily?.data) ? daily.data : (Array.isArray(daily) ? daily : []);
+  const dailyArr = getDailyRows(daily);
   if (!dailyArr.length) return [];
 
   const visibleDates = new Set(getZoomSlice(range, dailyArr.map((row) => row.date)));
@@ -69,6 +56,88 @@ function summarizeVisibleDailyRows(daily, range) {
     elapsed: rows.reduce((sum, row) => sum + clampNumber(row?.elapsed_seconds), 0),
     cost: rows.reduce((sum, row) => sum + clampNumber(row?.cost), 0),
     days: rows.length || 1,
+  };
+}
+
+function scaleBreakdown(breakdown, factor, numericKeys) {
+  const next = {};
+  for (const [key, value] of Object.entries(breakdown || {})) {
+    next[key] = {};
+    for (const numericKey of numericKeys) {
+      next[key][numericKey] = clampNumber(value?.[numericKey]) * factor;
+    }
+  }
+  return next;
+}
+
+function scaleDailyRow(row, factor) {
+  if (factor >= 0.999) return row;
+  return {
+    ...row,
+    tokens: clampNumber(row?.tokens) * factor,
+    elapsed_seconds: clampNumber(row?.elapsed_seconds) * factor,
+    cost: clampNumber(row?.cost) * factor,
+    sessions: clampNumber(row?.sessions) * factor,
+    by_model: scaleBreakdown(row?.by_model, factor, ['tokens', 'cost', 'elapsed_seconds']),
+    by_family: scaleBreakdown(row?.by_family, factor, ['tokens', 'cost', 'elapsed_seconds', 'sessions']),
+    by_repo: scaleBreakdown(row?.by_repo, factor, ['tokens', 'cost', 'elapsed_seconds', 'sessions']),
+  };
+}
+
+function sliceDailyRowsAtCursor(daily, cursor) {
+  const rows = getDailyRows(daily);
+  if (!rows.length) return [];
+
+  const lastIndex = rows.length - 1;
+  const clampedCursor = Math.max(0, Math.min(lastIndex, Number.isFinite(cursor) ? cursor : lastIndex));
+  const fullIndex = Math.floor(clampedCursor);
+  const nextIndex = Math.min(lastIndex, Math.ceil(clampedCursor));
+  const fractional = clampedCursor - fullIndex;
+
+  return rows.slice(0, nextIndex + 1).map((row, index) => (
+    index <= fullIndex ? row : scaleDailyRow(row, fractional)
+  ));
+}
+
+function sumMetricRows(rows, breakdownKey, keyField) {
+  const totals = new Map();
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row?.[breakdownKey] || {})) {
+      if (!totals.has(key)) {
+        totals.set(key, { key, label: key, [keyField]: key, tokens: 0 });
+      }
+      totals.get(key).tokens += clampNumber(value?.tokens);
+    }
+  }
+  return [...totals.values()].sort((a, b) => b.tokens - a.tokens);
+}
+
+export function buildDailyCursorPresentationTarget({ daily, range, cursor, fallback }) {
+  const rowsAtCursor = sliceDailyRowsAtCursor(daily, cursor);
+  const visibleRows = range === 'd7'
+    ? rowsAtCursor.slice(-7)
+    : range === 'd30'
+    ? rowsAtCursor.slice(-30)
+    : rowsAtCursor;
+
+  if (!visibleRows.length) return fallback;
+
+  const stats = {
+    ...(fallback?.stats || {}),
+    tokens: visibleRows.reduce((sum, row) => sum + clampNumber(row?.tokens), 0),
+    elapsed: visibleRows.reduce((sum, row) => sum + clampNumber(row?.elapsed_seconds), 0),
+    cost: visibleRows.reduce((sum, row) => sum + clampNumber(row?.cost), 0),
+    sessions: visibleRows.reduce((sum, row) => sum + clampNumber(row?.sessions), 0),
+    days: visibleRows.length || 1,
+  };
+
+  return {
+    ...(fallback || {}),
+    ready: true,
+    stats,
+    topRepos: sumMetricRows(visibleRows, 'by_repo', 'repo_label').slice(0, 6),
+    topFamilies: sumMetricRows(visibleRows, 'by_family', 'family'),
+    topModels: sumMetricRows(visibleRows, 'by_model', 'model_name').slice(0, 6),
   };
 }
 
