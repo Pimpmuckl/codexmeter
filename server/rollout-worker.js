@@ -6,10 +6,10 @@ if (!parentPort) {
 }
 
 parentPort.on('message', async (message) => {
-  const { id, rolloutPath, timezone } = message || {};
+  const { id, rolloutPath, timezone, readerOptions } = message || {};
 
   try {
-    const result = await enrichFromRollout(rolloutPath, { timezone });
+    const result = await enrichFromRollout(rolloutPath, { timezone, ...(readerOptions || {}) });
     parentPort.postMessage({ id, ok: true, data: result });
   } catch (error) {
     parentPort.postMessage({

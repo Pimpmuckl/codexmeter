@@ -514,7 +514,7 @@ export function OverviewFrame({
       OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs ?? 30
     );
 
-  const chartInteractive = !exportMode && !exportPlayback;
+  const chartInteractive = !exportMode && !exportPlayback && !isIngestActive;
 
   const repoOption = {
     backgroundColor: 'transparent',

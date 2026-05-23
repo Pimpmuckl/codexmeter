@@ -138,6 +138,14 @@ function getVisibleBarWidth(range, count) {
   return 14;
 }
 
+function getVisibleBarMinWidth(range, count) {
+  if (range === 'd7') return 8;
+  if (range === 'd30') return 3;
+  if (count <= 31) return 2;
+  if (count <= 90) return 1;
+  return 0;
+}
+
 function getVisibleBarPercent(range, count) {
   if (range === 'd7') return '72%';
   if (range === 'd30') return '54%';
@@ -410,6 +418,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
   }, [dates.length, zoomWindow, targetZoomWindow]);
 
   const visibleBarWidth = useMemo(() => getVisibleBarWidth(range, visibleDateCount), [range, visibleDateCount]);
+  const visibleBarMinWidth = useMemo(() => getVisibleBarMinWidth(range, visibleDateCount), [range, visibleDateCount]);
   const visibleBarPercent = useMemo(() => getVisibleBarPercent(range, visibleDateCount), [range, visibleDateCount]);
 
   const groups = useMemo(() => {
@@ -540,7 +549,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
         itemStyle: { color },
         barWidth: visibleBarPercent,
         barMaxWidth: visibleBarWidth,
-        barMinWidth: Math.min(10, visibleBarWidth),
+        barMinWidth: visibleBarMinWidth,
       };
     });
   }, [
@@ -553,6 +562,7 @@ const DailyMainChart = React.memo(function DailyMainChart({
     dates,
     visibleBarPercent,
     visibleBarWidth,
+    visibleBarMinWidth,
   ]);
 
   const labelSpecs = useMemo(() => {

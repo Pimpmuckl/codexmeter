@@ -1,8 +1,18 @@
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { readFile } from 'fs/promises';
+import { spawn } from 'child_process';
 import { createDayKeyFormatter } from './day-key.js';
 
 const ACTIVE_GAP_CAP_MS = 15 * 60 * 1000;
+const LINE_HEADER_SCAN_CHARS = 512;
+const TIMESTAMP_RE = /"timestamp"\s*:\s*"([^"]+)"/;
+const DEFAULT_RG_MIN_BYTES = 10 * 1024 * 1024;
+const RG_RELEVANT_PATTERN =
+  '"type"\\s*:\\s*"session_meta"|' +
+  '"type"\\s*:\\s*"turn_context"|' +
+  '"type"\\s*:\\s*"token_count"';
+const RG_TOKEN_COUNT_PATTERN = '"type"\\s*:\\s*"token_count"';
+const RG_TIMESTAMP_PATTERN = '^\\{[^{}]*"timestamp"\\s*:\\s*"[^"]+"';
 
 export async function enrichFromRollout(rolloutPath, opts = {}) {
   if (!rolloutPath || !existsSync(rolloutPath)) {
@@ -11,6 +21,9 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
 
   const tz = opts.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const toDayKey = opts.toDayKey || createDayKeyFormatter(tz);
+  const fastScan = opts.fastScan === true;
+  const rgScan = opts.rgScan === true;
+  const rgMinBytes = Math.max(0, Number(opts.rgMinBytes ?? DEFAULT_RG_MIN_BYTES) || 0);
   const result = {
     model_name: null,
     reasoning_effort: null,
@@ -27,7 +40,20 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
   };
 
   try {
-    const content = await readFile(rolloutPath, 'utf8');
+    let lines = null;
+    let activeFromRgTimestamps = false;
+    if (rgScan && shouldUseRipgrep(rolloutPath, rgMinBytes)) {
+      const rgResult = await readRolloutLinesWithRipgrep(rolloutPath);
+      if (rgResult) {
+        lines = rgResult.relevantLines;
+        applyTimestampMatches(result, rgResult.timestampMatches, toDayKey);
+        activeFromRgTimestamps = true;
+      }
+    }
+    if (!lines) {
+      const content = await readFile(rolloutPath, 'utf8');
+      lines = content.split(/\r?\n/);
+    }
 
     let prevTimestamp = null;
     let activeMs = 0;
@@ -39,21 +65,17 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
     let lastReasoningOutputTokens = 0;
     let lastTotalTokens = 0;
     let hasSeenUsage = false;
-    for (const line of content.split(/\r?\n/)) {
+    for (const line of lines) {
       if (!line.trim()) continue;
 
       try {
-        const obj = JSON.parse(line);
+        let obj = null;
+        let ts = null;
 
-        if (obj.timestamp) {
-          const ts = new Date(obj.timestamp).getTime();
-          if (!isNaN(ts)) {
-            if (!result.first_timestamp || ts < result.first_timestamp) {
-              result.first_timestamp = ts;
-            }
-            if (!result.last_timestamp || ts > result.last_timestamp) {
-              result.last_timestamp = ts;
-            }
+        if (fastScan || activeFromRgTimestamps) {
+          ts = extractTimestampMs(line);
+          if (ts !== null && !activeFromRgTimestamps) {
+            updateTimestampBounds(result, ts);
             if (prevTimestamp !== null && ts >= prevTimestamp) {
               const deltaMs = Math.min(ts - prevTimestamp, ACTIVE_GAP_CAP_MS);
               activeMs += deltaMs;
@@ -63,6 +85,25 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
               }
             }
             prevTimestamp = ts;
+          }
+          if (!activeFromRgTimestamps && !isRolloutLineWorthParsing(line)) continue;
+          obj = JSON.parse(line);
+        } else {
+          obj = JSON.parse(line);
+          if (obj.timestamp) {
+            ts = new Date(obj.timestamp).getTime();
+            if (!isNaN(ts)) {
+              updateTimestampBounds(result, ts);
+              if (prevTimestamp !== null && ts >= prevTimestamp) {
+                const deltaMs = Math.min(ts - prevTimestamp, ACTIVE_GAP_CAP_MS);
+                activeMs += deltaMs;
+                if (deltaMs > 0) {
+                  const dayKey = toDayKey(prevTimestamp);
+                  activeByDay.set(dayKey, (activeByDay.get(dayKey) || 0) + deltaMs);
+                }
+              }
+              prevTimestamp = ts;
+            }
           }
         }
 
@@ -121,16 +162,13 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
             lastOutputTokens = outputTokens;
             lastReasoningOutputTokens = reasoningOutputTokens;
             lastTotalTokens = totalTokens;
-            if (obj.timestamp && hasUsageBoundarySignal(usageDelta)) {
-              const ts = new Date(obj.timestamp).getTime();
-              if (!isNaN(ts)) {
-                if (!result.first_usage_timestamp || ts < result.first_usage_timestamp) {
-                  result.first_usage_timestamp = ts;
-                }
-                if (hasUsage(usageDelta)) {
-                  const dayKey = toDayKey(ts);
-                  mergeUsageTotals(usageByDay, dayKey, usageDelta);
-                }
+            if (ts !== null && hasUsageBoundarySignal(usageDelta)) {
+              if (!result.first_usage_timestamp || ts < result.first_usage_timestamp) {
+                result.first_usage_timestamp = ts;
+              }
+              if (hasUsage(usageDelta)) {
+                const dayKey = toDayKey(ts);
+                mergeUsageTotals(usageByDay, dayKey, usageDelta);
               }
             }
           }
@@ -179,19 +217,30 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
   return result;
 }
 
-export async function readUsageTimeline(rolloutPath) {
+export async function readUsageTimeline(rolloutPath, opts = {}) {
   if (!rolloutPath || !existsSync(rolloutPath)) {
     return [];
   }
 
   try {
-    const content = await readFile(rolloutPath, 'utf8');
+    const fastScan = opts.fastScan === true;
+    const rgScan = opts.rgScan === true;
+    const rgMinBytes = Math.max(0, Number(opts.rgMinBytes ?? DEFAULT_RG_MIN_BYTES) || 0);
+    let lines = null;
+    if (rgScan && shouldUseRipgrep(rolloutPath, rgMinBytes)) {
+      lines = await readMatchingLinesWithRipgrep(RG_TOKEN_COUNT_PATTERN, rolloutPath);
+    }
+    if (!lines) {
+      const content = await readFile(rolloutPath, 'utf8');
+      lines = content.split(/\r?\n/);
+    }
     const timeline = [];
     let segmentId = 0;
     let lastTotalTokens = 0;
     let hasSeenUsage = false;
-    for (const line of content.split(/\r?\n/)) {
+    for (const line of lines) {
       if (!line.trim()) continue;
+      if (fastScan && !isTokenCountEventLine(line)) continue;
       try {
         const obj = JSON.parse(line);
         if (obj.type !== 'event_msg' || obj.payload?.type !== 'token_count') continue;
@@ -239,6 +288,116 @@ export function findUsageEntryAtOrBefore(timeline, timestampMs) {
 
 export function findUsageAtOrBefore(timeline, timestampMs) {
   return findUsageEntryAtOrBefore(timeline, timestampMs)?.usage || null;
+}
+
+function shouldUseRipgrep(rolloutPath, minBytes) {
+  try {
+    return statSync(rolloutPath).size >= minBytes;
+  } catch {
+    return false;
+  }
+}
+
+async function readRolloutLinesWithRipgrep(rolloutPath) {
+  const [relevantLines, timestampMatches] = await Promise.all([
+    readMatchingLinesWithRipgrep(RG_RELEVANT_PATTERN, rolloutPath),
+    readMatchingLinesWithRipgrep(RG_TIMESTAMP_PATTERN, rolloutPath, ['--only-matching']),
+  ]);
+  if (!relevantLines || !timestampMatches) return null;
+  return { relevantLines, timestampMatches };
+}
+
+function readMatchingLinesWithRipgrep(pattern, rolloutPath, extraArgs = []) {
+  return new Promise((resolve) => {
+    const args = [
+      '--no-heading',
+      '--no-line-number',
+      '--color',
+      'never',
+      ...extraArgs,
+      pattern,
+      rolloutPath,
+    ];
+    const child = spawn('rg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => {
+      if (code !== 0 && code !== 1) {
+        resolve(null);
+        return;
+      }
+      resolve(stdout ? stdout.split(/\r?\n/).filter(Boolean) : []);
+    });
+  });
+}
+
+function applyTimestampMatches(result, timestampMatches, toDayKey) {
+  let prevTimestamp = null;
+  let activeMs = 0;
+  const activeByDay = new Map();
+
+  for (const line of timestampMatches || []) {
+    const ts = extractTimestampMs(line);
+    if (ts === null) continue;
+    updateTimestampBounds(result, ts);
+    if (prevTimestamp !== null && ts >= prevTimestamp) {
+      const deltaMs = Math.min(ts - prevTimestamp, ACTIVE_GAP_CAP_MS);
+      activeMs += deltaMs;
+      if (deltaMs > 0) {
+        const dayKey = toDayKey(prevTimestamp);
+        activeByDay.set(dayKey, (activeByDay.get(dayKey) || 0) + deltaMs);
+      }
+    }
+    prevTimestamp = ts;
+  }
+
+  if (activeMs > 0) {
+    const activeByDaySeconds = Object.fromEntries(
+      [...activeByDay.entries()].map(([dayKey, ms]) => [dayKey, Math.round(ms / 1000)])
+    );
+    result.active_by_day = activeByDaySeconds;
+    result.active_seconds = Object.values(activeByDaySeconds).reduce((sum, seconds) => sum + seconds, 0);
+  }
+}
+
+function updateTimestampBounds(result, ts) {
+  if (!result.first_timestamp || ts < result.first_timestamp) {
+    result.first_timestamp = ts;
+  }
+  if (!result.last_timestamp || ts > result.last_timestamp) {
+    result.last_timestamp = ts;
+  }
+}
+
+function extractTimestampMs(line) {
+  const head = line.length > LINE_HEADER_SCAN_CHARS
+    ? line.slice(0, LINE_HEADER_SCAN_CHARS)
+    : line;
+  const match = TIMESTAMP_RE.exec(head);
+  if (!match) return null;
+  const ts = Date.parse(match[1]);
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function isRolloutLineWorthParsing(line) {
+  const head = line.length > LINE_HEADER_SCAN_CHARS
+    ? line.slice(0, LINE_HEADER_SCAN_CHARS)
+    : line;
+  return head.includes('"type":"token_count"') ||
+    head.includes('"type":"turn_context"') ||
+    head.includes('"type":"session_meta"');
+}
+
+function isTokenCountEventLine(line) {
+  const head = line.length > LINE_HEADER_SCAN_CHARS
+    ? line.slice(0, LINE_HEADER_SCAN_CHARS)
+    : line;
+  return head.includes('"type":"token_count"');
 }
 
 function normalizeUsageTotals(usage) {

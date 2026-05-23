@@ -3,8 +3,9 @@ import { Worker } from 'worker_threads';
 
 export function createRolloutWorkerPool(opts = {}) {
   const size = normalizePoolSize(opts.size);
+  const readerOptions = opts.readerOptions || {};
   if (size <= 1) {
-    return createInlinePool();
+    return createInlinePool({ readerOptions });
   }
 
   const workers = new Set();
@@ -89,6 +90,7 @@ export function createRolloutWorkerPool(opts = {}) {
         id,
         rolloutPath: task.rolloutPath,
         timezone: task.timezone,
+        readerOptions,
       });
     }
   }
@@ -107,6 +109,70 @@ export function createRolloutWorkerPool(opts = {}) {
     return Promise.all(rolloutPaths.map((rolloutPath) => runTask(rolloutPath, timezone)));
   }
 
+  async function mapRolloutsInChunks(rolloutPaths, timezone, { chunkSize = 100, onChunk } = {}) {
+    const results = new Array(rolloutPaths.length);
+    const completed = new Array(rolloutPaths.length).fill(false);
+    const safeChunkSize = Math.max(1, Number(chunkSize) || 1);
+    const maxInFlight = Math.max(safeChunkSize, size * 4);
+    let nextStartIndex = 0;
+    let nextFlushIndex = 0;
+    let activeCount = 0;
+    let completedCount = 0;
+    let flushChain = Promise.resolve();
+    let rejected = false;
+
+    const scheduleFlush = (force = false) => {
+      if (typeof onChunk !== 'function') return;
+      const chunk = [];
+      while (nextFlushIndex < results.length && completed[nextFlushIndex]) {
+        chunk.push({ index: nextFlushIndex, result: results[nextFlushIndex] });
+        nextFlushIndex += 1;
+        if (!force && chunk.length >= safeChunkSize) break;
+      }
+      if (!chunk.length) return;
+      flushChain = flushChain.then(() => onChunk(chunk));
+    };
+
+    await new Promise((resolve, reject) => {
+      const launchNext = () => {
+        if (rejected) return;
+        while (activeCount < maxInFlight && nextStartIndex < rolloutPaths.length) {
+          const index = nextStartIndex;
+          const rolloutPath = rolloutPaths[index];
+          nextStartIndex += 1;
+          activeCount += 1;
+          runTask(rolloutPath, timezone)
+            .then((result) => {
+              results[index] = result;
+              completed[index] = true;
+              completedCount += 1;
+              activeCount -= 1;
+              scheduleFlush(false);
+              if (completedCount >= rolloutPaths.length && activeCount === 0) {
+                resolve();
+                return;
+              }
+              launchNext();
+            })
+            .catch((error) => {
+              rejected = true;
+              reject(error);
+            });
+        }
+
+        if (completedCount >= rolloutPaths.length && activeCount === 0) {
+          resolve();
+        }
+      };
+
+      launchNext();
+    });
+
+    scheduleFlush(true);
+    await flushChain;
+    return results;
+  }
+
   async function close() {
     closed = true;
     while (queuedTasks.length > 0) {
@@ -122,10 +188,10 @@ export function createRolloutWorkerPool(opts = {}) {
     idleWorkers.length = 0;
   }
 
-  return { mapRollouts, close, size };
+  return { mapRollouts, mapRolloutsInChunks, close, size };
 }
 
-function createInlinePool() {
+function createInlinePool({ readerOptions = {} } = {}) {
   return {
     size: 1,
     async mapRollouts(rolloutPaths, timezone) {
@@ -133,7 +199,7 @@ function createInlinePool() {
       return Promise.all(
         rolloutPaths.map(async (rolloutPath) => {
           try {
-            const data = await enrichFromRollout(rolloutPath, { timezone });
+            const data = await enrichFromRollout(rolloutPath, { timezone, ...readerOptions });
             return { ok: true, data, error: null };
           } catch (error) {
             return {
@@ -144,6 +210,39 @@ function createInlinePool() {
           }
         })
       );
+    },
+    async mapRolloutsInChunks(rolloutPaths, timezone, { chunkSize = 100, onChunk } = {}) {
+      const { enrichFromRollout } = await import('./rollout-reader.js');
+      const results = [];
+      const completed = [];
+      const safeChunkSize = Math.max(1, Number(chunkSize) || 1);
+
+      for (let index = 0; index < rolloutPaths.length; index += 1) {
+        try {
+          const data = await enrichFromRollout(rolloutPaths[index], { timezone, ...readerOptions });
+          const result = { ok: true, data, error: null };
+          results[index] = result;
+          completed.push({ index, result });
+        } catch (error) {
+          const result = {
+            ok: false,
+            data: null,
+            error: error instanceof Error ? error.message : String(error),
+          };
+          results[index] = result;
+          completed.push({ index, result });
+        }
+
+        if (typeof onChunk === 'function' && completed.length >= safeChunkSize) {
+          await onChunk(completed.splice(0, completed.length));
+        }
+      }
+
+      if (typeof onChunk === 'function' && completed.length) {
+        await onChunk(completed.splice(0, completed.length));
+      }
+
+      return results;
     },
     async close() {},
   };

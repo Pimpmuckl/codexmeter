@@ -22,7 +22,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
   live: {
     frameIntervalMs: 33,
     overviewHz: 20,
-    dayKeysPerEmit: 1,
+    dayKeysPerEmit: 8,
   },
   main: {
     presentationDurationMs: 220,
@@ -35,7 +35,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
     // Master switch for the end-of-ingest slowdown behavior.
     enabled: true,
     // Progress threshold where the tail mode starts, expressed from 0..1.
-    startPercent: 0.5,
+    startPercent: 0.95,
     // Fixed presentation duration in ms during the tail; use AUTO to derive it from main.durationScale.
     durationMs: AUTO,
     // Multiplier applied to the normal presentation duration when durationMs is AUTO.
@@ -43,7 +43,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
     // Shared easing applied by the Overview presentation animator during the tail.
     easing: 'cubicOut',
     // Backend Overview live-update cadence during the tail, in patches per second.
-    overviewHz: 10,
+    overviewHz: 20,
   },
   daily: {
     chartAppearDurationMs: AUTO,

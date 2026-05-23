@@ -60,11 +60,25 @@ export function createIngestState() {
 }
 
 export async function runIngest(codexHome, state, opts = {}) {
+  const timingEnabled = opts.ingestTiming === true;
+  const timingStartedAt = performance.now();
+  let timingLastLogAt = timingStartedAt;
   const tz = opts.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const toDayKey = createDayKeyFormatter(tz);
   const runToken = state.run_token;
   const isCurrentRun = () => state.run_token === runToken;
-  const workerPool = createRolloutWorkerPool({ size: opts.workerThreads });
+  const fastRolloutReader = opts.fastRolloutReader === true;
+  const rgRolloutReader = opts.rgRolloutReader === true;
+  const streamRolloutChunks = opts.streamRolloutChunks === true;
+  const readerOptions = {
+    fastScan: fastRolloutReader || rgRolloutReader,
+    rgScan: rgRolloutReader,
+    rgMinBytes: opts.rgMinBytes,
+  };
+  const workerPool = createRolloutWorkerPool({
+    size: opts.workerThreads,
+    readerOptions,
+  });
 
   try {
     state.live_state = createLiveAggregateState(tz);
@@ -149,24 +163,38 @@ export async function runIngest(codexHome, state, opts = {}) {
       queueLivePatch(state, bootstrapPatch);
     }
 
-    const candidates = selectEnrichmentCandidates(sessions);
+    const candidates = selectEnrichmentCandidates(sessions, {
+      recentFirstDays: opts.recentFirstDays,
+      warmupOldestCount: opts.warmupOldestCount,
+    });
 
     state.needs_enrichment = candidates.length;
     state.percent = candidates.length > 0 ? 0.08 : 0.90;
     const BATCH_SIZE = opts.batchSize || 40;
+    const RESULT_CHUNK_SIZE = Math.max(1, Number(opts.resultChunkSize || Math.min(BATCH_SIZE, 16)) || 16);
     const ROOT_REFRESH_EVERY = opts.rootRefreshEvery || 1000;
-    const resolveForkUsageSnapshot = createForkUsageSnapshotResolver(sessions);
+    const FORK_CORRECTION_CONCURRENCY = Math.max(1, Number(opts.forkCorrectionConcurrency || 1) || 1);
+    logIngestTiming(timingEnabled, 'start', {
+      rollouts: candidates.length,
+      workers: workerPool.size,
+      rg: rgRolloutReader,
+      stream: streamRolloutChunks,
+      forkConcurrency: FORK_CORRECTION_CONCURRENCY,
+    });
+    const resolveForkUsageSnapshot = createForkUsageSnapshotResolver(sessions, {
+      fastScan: fastRolloutReader,
+      rgScan: rgRolloutReader,
+      rgMinBytes: opts.rgMinBytes,
+    });
     let lastRootRefreshCount = 0;
+    let enrichedCount = 0;
 
-    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-      const batch = candidates.slice(i, i + BATCH_SIZE);
-
+    const handleEnrichedBatch = async (batch, results) => {
       if (batch[0]?.started_at) {
         const d = new Date(batch[0].started_at * 1000);
         state.current_date_bucket = d.toLocaleDateString('en-CA', { timeZone: tz });
       }
 
-      const results = await workerPool.mapRollouts(batch.map((session) => session.rollout_path), tz);
       if (!isCurrentRun()) return;
 
       const workerError = results.find((result) => result?.ok === false);
@@ -202,7 +230,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         }
       }
 
-      await applyForkUsageCorrections(batch, resolveForkUsageSnapshot);
+      await applyForkUsageCorrections(batch, resolveForkUsageSnapshot, FORK_CORRECTION_CONCURRENCY);
       for (const s of batch) {
         if (s._usage_by_day_raw) {
           s.usage_by_day = buildUsageByDayMetrics(s.model_name, s._usage_by_day_raw);
@@ -216,13 +244,14 @@ export async function runIngest(codexHome, state, opts = {}) {
         s.materialized = true;
       }
 
+      enrichedCount = Math.min(enrichedCount + batch.length, candidates.length);
       const shouldRefreshRoots =
-        state.enriched === 0 ||
-        (state.enriched - lastRootRefreshCount) >= ROOT_REFRESH_EVERY;
+        enrichedCount === batch.length ||
+        (enrichedCount - lastRootRefreshCount) >= ROOT_REFRESH_EVERY;
 
       if (shouldRefreshRoots) {
         assignRootThreadIds(sessions);
-        lastRootRefreshCount = state.enriched;
+        lastRootRefreshCount = enrichedCount;
       }
       const liveReady = bufferLiveSessionsForPresentation(state, batch);
       state.current_date_bucket = pickVisibleDateBucket(
@@ -235,13 +264,48 @@ export async function runIngest(codexHome, state, opts = {}) {
       }
       queueLivePatch(state, livePatch);
 
-      state.enriched = Math.min(i + BATCH_SIZE, candidates.length);
+      state.enriched = enrichedCount;
       state.percent = candidates.length > 0
         ? 0.08 + (state.enriched / candidates.length) * 0.82
         : 0.90;
       queueLiveProgress(state);
 
+      const now = performance.now();
+      if (timingEnabled && now - timingLastLogAt >= 5000) {
+        timingLastLogAt = now;
+        const elapsedSeconds = Math.max((now - timingStartedAt) / 1000, 0.001);
+        logIngestTiming(true, 'progress', {
+          enriched: state.enriched,
+          rollouts: candidates.length,
+          rate: Math.round(state.enriched / elapsedSeconds),
+          currentDate: state.current_date_bucket,
+        });
+      }
+    };
+
+    if (streamRolloutChunks) {
+      await workerPool.mapRolloutsInChunks(
+        candidates.map((session) => session.rollout_path),
+        tz,
+        {
+          chunkSize: RESULT_CHUNK_SIZE,
+          onChunk: async (chunk) => {
+            const orderedChunk = chunk.slice().sort((a, b) => a.index - b.index);
+            const batch = orderedChunk.map(({ index }) => candidates[index]);
+            const results = orderedChunk.map(({ result }) => result);
+            await handleEnrichedBatch(batch, results);
+          },
+        }
+      );
       if (!isCurrentRun()) return;
+    } else {
+      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+        const batch = candidates.slice(i, i + BATCH_SIZE);
+        const results = await workerPool.mapRollouts(batch.map((session) => session.rollout_path), tz);
+        await handleEnrichedBatch(batch, results);
+
+        if (!isCurrentRun()) return;
+      }
     }
 
     for (const s of sessions) {
@@ -268,6 +332,11 @@ export async function runIngest(codexHome, state, opts = {}) {
     state.current_date_bucket = null;
     queueLiveProgress(state);
     finalizeWithoutSubscribers(state);
+    logIngestTiming(timingEnabled, 'finalizing', {
+      elapsedSeconds: Number(((performance.now() - timingStartedAt) / 1000).toFixed(1)),
+      rollouts: candidates.length,
+      events: state.replay_capture.events.length,
+    });
 
   } catch (err) {
     if (!isCurrentRun()) return;
@@ -328,10 +397,27 @@ export function filterVisibleSessions(sessions) {
   return sessions.filter((session) => !isReviewLauncherSession(session));
 }
 
-export function selectEnrichmentCandidates(sessions) {
-  return sessions
+export function selectEnrichmentCandidates(sessions, opts = {}) {
+  const sorted = sessions
     .filter((session) => session.rollout_path)
     .sort((a, b) => (a.started_at || 0) - (b.started_at || 0));
+  const recentFirstDays = Number(opts.recentFirstDays || 0);
+  const warmupOldestCount = Math.max(0, Number(opts.warmupOldestCount || 0) || 0);
+  if (!Number.isFinite(recentFirstDays) || recentFirstDays <= 0) return sorted;
+
+  const warmup = sorted.slice(0, warmupOldestCount);
+  const remaining = sorted.slice(warmupOldestCount);
+  const cutoff = (Date.now() / 1000) - recentFirstDays * 86400;
+  const recent = [];
+  const older = [];
+  for (const session of remaining) {
+    if ((session.ended_at || session.started_at || 0) >= cutoff) {
+      recent.push(session);
+    } else {
+      older.push(session);
+    }
+  }
+  return [...warmup, ...recent, ...older];
 }
 
 export function pickVisibleDateBucket(bufferedSessions, liveReadySessions) {
@@ -468,9 +554,14 @@ function buildUsageByDayMetrics(modelName, usageByDay) {
   return entries;
 }
 
-function createForkUsageSnapshotResolver(sessions) {
+function createForkUsageSnapshotResolver(sessions, opts = {}) {
   const byId = new Map(sessions.map((session) => [session.thread_id, session]));
   const timelineCache = new Map();
+  const timelineOptions = {
+    fastScan: opts.fastScan === true || opts.rgScan === true,
+    rgScan: opts.rgScan === true,
+    rgMinBytes: opts.rgMinBytes,
+  };
 
   return async function resolveForkUsageSnapshot(parentThreadId, boundary) {
     if (!parentThreadId || !boundary) return null;
@@ -479,7 +570,7 @@ function createForkUsageSnapshotResolver(sessions) {
 
     let timelinePromise = timelineCache.get(parentThreadId);
     if (!timelinePromise) {
-      timelinePromise = readUsageTimeline(parent.rollout_path);
+      timelinePromise = readUsageTimeline(parent.rollout_path, timelineOptions);
       timelineCache.set(parentThreadId, timelinePromise);
     }
 
@@ -501,29 +592,38 @@ export function selectForkParentUsageEntry(timeline, {
   return firstUsageEntry || startEntry || null;
 }
 
-async function applyForkUsageCorrections(sessions, resolveForkUsageSnapshot) {
-  for (const session of sessions) {
+async function applyForkUsageCorrections(sessions, resolveForkUsageSnapshot, concurrency = 1) {
+  const targets = sessions.filter((session) => {
     const parentThreadId = getForkLineageParentThreadId(session);
-    if (!parentThreadId) continue;
-    if (session._usage_reset_detected) continue;
-    // Use the child's first observed token snapshot as the primary fork
-    // boundary. On the real fork-heavy March chains, this consistently
-    // produced better attribution than started_at: the delay from start to
-    // first token_count is usually sub-second, while started_at retains
-    // slightly more inherited parent usage. We still pass started_at through
-    // to the resolver so a parent reset between fork start and first child
-    // stream can fall back to the pre-reset parent segment instead of
-    // under-subtracting inherited usage. If the child rollout later resets its
-    // token counters, we treat the post-reset segment as the authoritative
-    // child-only usage and do not subtract the parent again, because that
-    // would double-normalize the same inherited baseline and undercount the
-    // child.
-    const inheritedUsage = await resolveForkUsageSnapshot(parentThreadId, {
-      startedAtMs: session.started_at ? session.started_at * 1000 : null,
-      firstUsageTimestampMs: session._first_usage_timestamp_ms || null,
-    });
-    applyForkUsageCorrection(session, inheritedUsage);
-  }
+    return parentThreadId && !session._usage_reset_detected;
+  });
+  if (!targets.length) return;
+
+  let index = 0;
+  const workerCount = Math.min(Math.max(1, Number(concurrency) || 1), targets.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (index < targets.length) {
+      const session = targets[index++];
+      const parentThreadId = getForkLineageParentThreadId(session);
+      // Use the child's first observed token snapshot as the primary fork
+      // boundary. On the real fork-heavy March chains, this consistently
+      // produced better attribution than started_at: the delay from start to
+      // first token_count is usually sub-second, while started_at retains
+      // slightly more inherited parent usage. We still pass started_at through
+      // to the resolver so a parent reset between fork start and first child
+      // stream can fall back to the pre-reset parent segment instead of
+      // under-subtracting inherited usage. If the child rollout later resets its
+      // token counters, we treat the post-reset segment as the authoritative
+      // child-only usage and do not subtract the parent again, because that
+      // would double-normalize the same inherited baseline and undercount the
+      // child.
+      const inheritedUsage = await resolveForkUsageSnapshot(parentThreadId, {
+        startedAtMs: session.started_at ? session.started_at * 1000 : null,
+        firstUsageTimestampMs: session._first_usage_timestamp_ms || null,
+      });
+      applyForkUsageCorrection(session, inheritedUsage);
+    }
+  }));
 }
 
 export function getForkLineageParentThreadId(session) {
@@ -858,6 +958,11 @@ function progressPayload(state) {
     error: state.error,
     generated_at: state.generated_at,
   };
+}
+
+function logIngestTiming(enabled, event, payload) {
+  if (!enabled) return;
+  console.log(`codexmeter ingest timing ${event}: ${JSON.stringify(payload)}`);
 }
 
 export function attachLiveSubscriber(state, res) {
