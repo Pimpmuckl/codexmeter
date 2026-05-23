@@ -25,6 +25,13 @@ function stackValue(frame, index) {
   return frame.series.reduce((sum, series) => sum + (series.data[index]?.[1] || 0), 0);
 }
 
+function stackValueAtSeek(daily, dayIndex, seekMs, startMs = 100, endMs = 15100) {
+  return stackValue(
+    buildExportDailySparkFrame(daily, { seekMs, startMs, endMs }),
+    dayIndex
+  );
+}
+
 test('export daily spark starts as a seven-day grow-in-place frame', () => {
   const daily = buildDaily(14);
   const frame = buildExportDailySparkFrame(daily, {
@@ -102,4 +109,23 @@ test('export daily spark cadence uses a stable baseline with slow edges', () => 
   assert.ok(durations[128] > middleMax * 2.5, 'the final day should brake visibly');
   assert.ok(middleMax - middleMin < 1, 'the middle cadence should not pulse between bursts and stalls');
   assert.ok(durations.every((duration) => duration > 75 && duration < 360));
+});
+
+test('export daily spark bars grow fast and settle softly', () => {
+  const daily = buildDaily(14);
+  const cadence = buildExportDailySparkCadence(14, {
+    startMs: 100,
+    endMs: 15100,
+  });
+  const dayIndex = 7;
+  const day = cadence[dayIndex];
+  const fullValue = (dayIndex + 1) * 125;
+  const quarter = stackValueAtSeek(daily, dayIndex, day.startMs + day.durationMs * 0.25);
+  const half = stackValueAtSeek(daily, dayIndex, day.startMs + day.durationMs * 0.5);
+  const threeQuarter = stackValueAtSeek(daily, dayIndex, day.startMs + day.durationMs * 0.75);
+
+  assert.ok(quarter > fullValue * 0.45);
+  assert.ok(half > fullValue * 0.8);
+  assert.ok((threeQuarter - half) < (half - quarter));
+  assert.ok(threeQuarter < fullValue);
 });
