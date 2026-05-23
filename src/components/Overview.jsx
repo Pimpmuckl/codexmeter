@@ -60,7 +60,9 @@ function wrapRepoLabel(label, maxLineLength = 16) {
 
 function getOverviewDailyBarSizing(count) {
   const safeCount = Math.max(1, count || 1);
-  const barWidth = Math.max(2.5, Math.min(24, 300 / safeCount));
+  const slotWidth = 300 / safeCount;
+  const densityFactor = safeCount > 80 ? 0.68 : safeCount > 45 ? 0.78 : 0.88;
+  const barWidth = Math.max(1.25, Math.min(24, slotWidth * densityFactor));
   return { barWidth, barMaxWidth: Math.max(4, Math.min(28, barWidth * 1.2)) };
 }
 

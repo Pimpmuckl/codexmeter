@@ -163,6 +163,73 @@ function buildSettledEnvelope() {
   };
 }
 
+function buildMultiDaySettledEnvelope(dayCount = 14) {
+  const days = Array.from({ length: dayCount }, (_, index) => {
+    const date = `2026-03-${String(index + 1).padStart(2, '0')}`;
+    const primary = (index + 1) * 100;
+    const secondary = (index + 1) * 25;
+    return {
+      date,
+      tokens: primary + secondary,
+      elapsed_seconds: index + 1,
+      cost: (primary + secondary) / 1000,
+      sessions: 1,
+      by_model: {
+        'gpt-5.4': { tokens: primary },
+        'gpt-5.5': { tokens: secondary },
+      },
+      by_family: {
+        generic: { tokens: primary + secondary, sessions: 1 },
+      },
+      by_repo: {
+        'nextide-web': { tokens: primary + secondary, sessions: 1 },
+      },
+    };
+  });
+  const totalTokens = days.reduce((sum, day) => sum + day.tokens, 0);
+  const heatmap = Object.fromEntries(days.map((day) => [day.date, {
+    tokens: day.tokens,
+    elapsed: day.elapsed_seconds,
+    cost: day.cost,
+  }]));
+
+  return {
+    overview: {
+      data: {
+        total: buildRangeOverview(totalTokens, dayCount),
+        d7: buildRangeOverview(totalTokens, dayCount),
+        d30: buildRangeOverview(totalTokens, dayCount),
+      },
+    },
+    repos: {
+      data: {
+        total: [{ repo_label: 'nextide-web', tokens: totalTokens }],
+        d7: [{ repo_label: 'nextide-web', tokens: totalTokens }],
+        d30: [{ repo_label: 'nextide-web', tokens: totalTokens }],
+      },
+    },
+    models: {
+      data: {
+        total: [
+          { model_name: 'gpt-5.4', tokens: days.reduce((sum, day) => sum + day.by_model['gpt-5.4'].tokens, 0) },
+          { model_name: 'gpt-5.5', tokens: days.reduce((sum, day) => sum + day.by_model['gpt-5.5'].tokens, 0) },
+        ],
+        d7: [],
+        d30: [],
+      },
+    },
+    families: {
+      data: {
+        total: [{ family: 'generic', tokens: totalTokens }],
+        d7: [{ family: 'generic', tokens: totalTokens }],
+        d30: [{ family: 'generic', tokens: totalTokens }],
+      },
+    },
+    daily: { data: days },
+    heatmap: { data: heatmap },
+  };
+}
+
 test('replay easing knob changes replay source progress', () => {
   const linearSim = createExportSimulation(buildRenderData({ replayEasing: 'linear' }));
   const cubicSim = createExportSimulation(buildRenderData({ replayEasing: 'cubicIn' }));
@@ -203,4 +270,40 @@ test('final export frame uses settled daily model stacks as authoritative truth'
   assert.equal(frame.presentation.stats.tokens, 150);
   assert.equal(dailySeries.get('gpt-5.4'), 100);
   assert.equal(dailySeries.get('gpt-5.5'), 50);
+});
+
+test('export daily spark starts with a seven-day domain and advances by smooth cursor', () => {
+  const sim = createExportSimulation({
+    ...buildRenderData(),
+    settledEnvelope: buildMultiDaySettledEnvelope(14),
+  });
+
+  const introFrame = advanceExportSimulation(sim, sim.startHoldDurationMs + 500);
+  const midFrame = advanceExportSimulation(sim, sim.startHoldDurationMs + 1800);
+  const finalFrame = advanceExportSimulation(sim, sim.totalDurationMs);
+
+  assert.equal(introFrame.presentation.daily.dates.length, 7);
+  assert.ok(
+    introFrame.presentation.daily.series.some((series) => (series.data[3] || 0) > 0),
+    'the intro should move past the first two days quickly'
+  );
+  assert.ok(
+    midFrame.presentation.daily.dates.length > introFrame.presentation.daily.dates.length,
+    'the main replay should keep adding days after the seven-day intro'
+  );
+  assert.equal(finalFrame.presentation.daily.dates.length, 14);
+});
+
+test('export heatmap does not reveal days beyond the daily cursor', () => {
+  const sim = createExportSimulation({
+    ...buildRenderData(),
+    settledEnvelope: buildMultiDaySettledEnvelope(14),
+  });
+
+  const frame = advanceExportSimulation(sim, sim.startHoldDurationMs + 500);
+  const lastDailyDate = frame.presentation.daily.dates[frame.presentation.daily.dates.length - 1];
+  const heatmapDates = Object.keys(frame.presentation.heatmap);
+
+  assert.ok(heatmapDates.length > 0);
+  assert.ok(heatmapDates.every((date) => date <= lastDailyDate));
 });
