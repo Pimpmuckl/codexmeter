@@ -169,7 +169,7 @@ function mergeDailyPresentationsByDate(previousDaily, nextDaily) {
   return { dates, series };
 }
 
-function useElasticDailyPresentation(sourceDaily, { isIngestActive = false, currentDateBucket = null } = {}) {
+function useElasticDailyPresentation(sourceDaily, { isIngestActive = false } = {}) {
   const stableSourceRef = useRef({ dates: [], series: [] });
   const stableDaily = useMemo(
     () => {
@@ -249,8 +249,26 @@ function useElasticDailyPresentation(sourceDaily, { isIngestActive = false, curr
   return { daily, cursor, rawTargetIndex, sourceDaily: stableDaily, targetIndex };
 }
 
-function getSparkZoomWindow(range, count) {
+function getSparkZoomWindow(range, count, cursor = null, cursorDriven = false) {
   if (!count) return { startValue: 0, endValue: 0 };
+  if (cursorDriven && Number.isFinite(cursor)) {
+    let targetDays = count;
+    if (range === 'd7') targetDays = 7;
+    if (range === 'd30') targetDays = 30;
+
+    const minEnd = range === 'd30' ? 29 : 6;
+    const maxEnd = Math.max(count - 1, minEnd);
+    const endValue = Math.max(minEnd, Math.min(maxEnd, cursor));
+    const visibleDays = range === 'total'
+      ? Math.max(7, endValue + 1)
+      : Math.max(1, Math.min(targetDays, endValue + 1));
+
+    return {
+      startValue: range === 'total' ? 0 : Math.max(0, endValue - visibleDays + 1),
+      endValue,
+    };
+  }
+
   let targetDays = count;
   if (range === 'd7') targetDays = 7;
   if (range === 'd30') targetDays = 30;
@@ -378,23 +396,44 @@ function DailySpark({
     targetIndex: sourceDaily.dates.length - 1,
   };
   const displayDaily = exportPlayback ? sourceDaily : resolvedElasticDaily.daily;
+  const cursorDrivenZoom = !exportMode && !exportPlayback && isIngestActive;
+  const cursorZoomWindow = useMemo(
+    () => getSparkZoomWindow(range, displayDaily.dates.length, resolvedElasticDaily.cursor, cursorDrivenZoom),
+    [range, displayDaily.dates.length, resolvedElasticDaily.cursor, cursorDrivenZoom]
+  );
   const [zoomWindow, setZoomWindow] = useState(() => getSparkZoomWindow(range, displayDaily.dates.length));
+  const lastCursorZoomWindowRef = useRef(cursorZoomWindow);
+  const wasCursorDrivenZoomRef = useRef(cursorDrivenZoom);
   const zoomWindowRef = useRef(zoomWindow);
-  zoomWindowRef.current = zoomWindow;
   const zoomAnimRafRef = useRef(0);
   const animatedDaily = useDailyStackPresentationTween(displayDaily, !exportMode && !exportPlayback, 'overview-daily-spark');
+  const activeZoomWindow = cursorDrivenZoom
+    ? cursorZoomWindow
+    : (wasCursorDrivenZoomRef.current ? lastCursorZoomWindowRef.current : zoomWindow);
+  zoomWindowRef.current = activeZoomWindow;
 
   useEffect(() => {
+    if (cursorDrivenZoom) {
+      lastCursorZoomWindowRef.current = cursorZoomWindow;
+      wasCursorDrivenZoomRef.current = true;
+      return undefined;
+    }
+
     const target = getSparkZoomWindow(range, displayDaily.dates.length);
+    if (wasCursorDrivenZoomRef.current) {
+      zoomWindowRef.current = lastCursorZoomWindowRef.current;
+      setZoomWindow(lastCursorZoomWindowRef.current);
+      wasCursorDrivenZoomRef.current = false;
+    }
     return startSparkZoomLerp(zoomWindowRef.current, target, setZoomWindow, zoomAnimRafRef, 220);
-  }, [range, displayDaily.dates.length]);
+  }, [cursorDrivenZoom, cursorZoomWindow, range, displayDaily.dates.length]);
 
   useEffect(() => () => {
     cancelAnimationFrame(zoomAnimRafRef.current);
     zoomAnimRafRef.current = 0;
   }, []);
 
-  const { startValue, endValue } = zoomWindow;
+  const { startValue, endValue } = activeZoomWindow;
   const visibleDateCount = Math.max(1, (endValue - startValue + 1) || displayDaily.dates.length);
   const { barWidth, barMaxWidth } = getOverviewDailyBarSizing(visibleDateCount);
   const xMin = Math.max(-0.5, startValue - 0.5);
@@ -702,7 +741,6 @@ export function OverviewFrame({
   const dailySparkActive = !exportMode && !exportPlayback && isIngestActive;
   const elasticDaily = useElasticDailyPresentation(sparkSourceDaily, {
     isIngestActive: dailySparkActive,
-    currentDateBucket,
   });
   const elasticDates = elasticDaily.daily?.dates || [];
   const presentationDateBucket = elasticDates[elasticDates.length - 1] || currentDateBucket;
