@@ -178,6 +178,14 @@ export default function OverviewVideoExport({ jobId }) {
     );
   }
 
+  const activeSim = simulationRef.current;
+  const exportDailyTiming = activeSim
+    ? {
+      startMs: activeSim.startHoldDurationMs,
+      endMs: activeSim.finalHoldStartMs,
+    }
+    : null;
+
   return (
     <div style={containerStyle}>
       <div style={frameStyle}>
@@ -196,6 +204,8 @@ export default function OverviewVideoExport({ jobId }) {
             exportPlayback={true}
             exportPhase={frameState.phase}
             exportSeekMs={frameState.seekMs}
+            exportDaily={activeSim?.finalPresentation?.daily || null}
+            exportDailyTiming={exportDailyTiming}
           />
           <div style={footerStyle}>
             Made with <span style={footerHeartStyle}>♥</span> by JJ

@@ -1,5 +1,5 @@
 import { mergeLiveEvent } from '../live-state.js';
-import { buildDailyCursorPresentationTarget, buildOverviewPresentationTarget, interpolateOverviewPresentation } from './overviewPresentation.js';
+import { buildOverviewPresentationTarget, interpolateOverviewPresentation } from './overviewPresentation.js';
 import { OVERVIEW_INGEST_ANIMATION } from './animationsDefault.js';
 
 export function createExportSimulation(renderData) {
@@ -35,7 +35,6 @@ export function createExportSimulation(renderData) {
   const tailEasing = renderData.tailEasing || 'cubicInOut';
   const settledPresentation = buildSettledPresentation(renderData);
   const finalPresentation = settledPresentation || keyframes[keyframes.length - 1]?.presentation || initialPresentation;
-  const finalDailyRows = renderData.settledEnvelope?.daily || null;
   const tailStartPresentation = samplePresentationFromKeyframes(keyframes, tailSourceStartMs);
   const lateReplayDurationMs = Math.min(3600, Math.max(1800, Math.round(replayDurationMs * 0.32)));
   const lateReplayStartMs = Math.max(
@@ -100,7 +99,6 @@ export function createExportSimulation(renderData) {
     tailStartPresentation,
     tailFrames,
     finalPresentation,
-    finalDailyRows,
     progress: initialProgress || { ...bootstrapProgress, percent: 0, complete: false },
     bootstrapProgress,
     replayEasing,
@@ -149,10 +147,6 @@ export function advanceExportSimulation(sim, requestedSeekMs) {
     sim.presentation = sim.finalPresentation;
   }
 
-  if (targetSeekMs < sim.finalHoldStartMs) {
-    sim.presentation = applyExportDailyReveal(sim, sim.presentation, targetSeekMs);
-  }
-
   if (targetSeekMs >= sim.finalHoldStartMs) {
     const holdProgress = clamp01((targetSeekMs - sim.finalHoldStartMs) / Math.max(sim.finalHoldDurationMs || 1, 1));
     sim.progress = {
@@ -186,119 +180,6 @@ export function advanceExportSimulation(sim, requestedSeekMs) {
   sim.debugTrace.push(debugState);
 
   return snapshotExportSimulation(sim);
-}
-
-function applyExportDailyReveal(sim, presentation, seekMs) {
-  const finalDaily = sim.finalPresentation?.daily;
-  if (!finalDaily?.dates?.length) return presentation;
-
-  const cursor = computeExportDailyCursor(sim, seekMs);
-  const daily = slicePresentationDailyAtCursor(finalDaily, cursor, 7);
-  const currentDate = daily.dates[Math.min(daily.dates.length - 1, Math.max(0, Math.floor(cursor)))] || daily.dates[daily.dates.length - 1];
-  const cursorFallback = {
-    ...sim.finalPresentation,
-    daily,
-    heatmap: filterHeatmapByDate(sim.finalPresentation?.heatmap || presentation.heatmap, currentDate),
-  };
-
-  if (!sim.finalDailyRows) {
-    return {
-      ...presentation,
-      daily,
-      heatmap: filterHeatmapByDate(presentation.heatmap, currentDate),
-    };
-  }
-  const cursorPresentation = buildDailyCursorPresentationTarget({
-    daily: sim.finalDailyRows,
-    range: 'total',
-    cursor,
-    fallback: cursorFallback,
-  });
-  return {
-    ...cursorPresentation,
-    topRepos: orderMetricRowsByReference(sim.finalPresentation?.topRepos, cursorPresentation.topRepos).slice(0, 6),
-    topFamilies: orderMetricRowsByReference(sim.finalPresentation?.topFamilies, cursorPresentation.topFamilies),
-    topModels: orderMetricRowsByReference(sim.finalPresentation?.topModels, cursorPresentation.topModels).slice(0, 6),
-  };
-}
-
-function computeExportDailyCursor(sim, seekMs) {
-  const dates = sim.finalPresentation?.daily?.dates || [];
-  if (!dates.length) return 0;
-
-  const lastIndex = dates.length - 1;
-  const introEndIndex = Math.min(6, lastIndex);
-  const motionStartMs = sim.startHoldDurationMs;
-  const motionEndMs = sim.finalHoldStartMs;
-  const motionDurationMs = Math.max(1, motionEndMs - motionStartMs);
-  const introDurationMs = Math.min(1200, Math.max(420, motionDurationMs * 0.11));
-  const motionElapsedMs = Math.max(0, seekMs - motionStartMs);
-
-  if (motionElapsedMs <= introDurationMs || introEndIndex >= lastIndex) {
-    return Math.min(lastIndex, introEndIndex * applyCubicOut(motionElapsedMs / Math.max(introDurationMs, 1)));
-  }
-
-  const mainT = clamp01((motionElapsedMs - introDurationMs) / Math.max(motionDurationMs - introDurationMs, 1));
-  return introEndIndex + ((lastIndex - introEndIndex) * applyQuinticInOut(mainT));
-}
-
-function slicePresentationDailyAtCursor(daily, cursor, minVisibleDays = 1) {
-  const dates = daily?.dates || [];
-  if (!dates.length) return { dates: [], series: [] };
-
-  const lastIndex = dates.length - 1;
-  const clampedCursor = Math.max(0, Math.min(lastIndex, Number.isFinite(cursor) ? cursor : lastIndex));
-  const fullIndex = Math.floor(clampedCursor);
-  const nextIndex = Math.min(lastIndex, Math.ceil(clampedCursor));
-  const fractional = clampedCursor - fullIndex;
-  const visibleCount = Math.max(Math.min(minVisibleDays, dates.length), nextIndex + 1);
-  const visibleDates = dates.slice(0, visibleCount);
-
-  const series = (daily.series || []).map((sourceSeries) => ({
-    ...sourceSeries,
-    data: visibleDates.map((_, index) => {
-      const value = sourceSeries.data?.[index] || 0;
-      if (index <= fullIndex) return value;
-      if (index === nextIndex) return value * fractional;
-      return 0;
-    }),
-  }));
-
-  return { dates: visibleDates, series };
-}
-
-function filterHeatmapByDate(heatmap, maxDate) {
-  if (!maxDate) return {};
-  const next = {};
-  for (const [date, value] of Object.entries(heatmap || {})) {
-    if (date <= maxDate) next[date] = value;
-  }
-  return next;
-}
-
-function orderMetricRowsByReference(referenceRows = [], valueRows = []) {
-  const valuesByKey = new Map((valueRows || []).map((row) => [row.key, row]));
-  const seen = new Set();
-  const ordered = [];
-
-  for (const reference of referenceRows || []) {
-    if (!reference?.key || seen.has(reference.key)) continue;
-    seen.add(reference.key);
-    const value = valuesByKey.get(reference.key);
-    ordered.push({
-      key: reference.key,
-      label: reference.label,
-      tokens: Math.max(0, value?.tokens || 0),
-    });
-  }
-
-  for (const value of valueRows || []) {
-    if (!value?.key || seen.has(value.key)) continue;
-    seen.add(value.key);
-    ordered.push(value);
-  }
-
-  return ordered;
 }
 
 export function mapReplaySeekMs(sim, timelineMs) {
@@ -356,6 +237,7 @@ export function blendExportFrameState(previousFrame, nextFrame, dt, elapsedMs) {
 export function computeFinalFlashStyle(seekMs, flashStartSeekMs) {
   const exportConfig = OVERVIEW_INGEST_ANIMATION.videoExport || {};
   const flashDurationMs = Math.max(exportConfig.finalFlashDurationMs ?? 280, 0);
+  const flashDelayMs = Math.max(exportConfig.finalFlashDelayMs ?? 0, 0);
   const flashMaxOpacity = Math.max(exportConfig.finalFlashMaxOpacity ?? 0.22, 0);
   if (!flashDurationMs || !flashMaxOpacity) {
     return { opacity: 0, boxShadow: 'none' };
@@ -363,7 +245,7 @@ export function computeFinalFlashStyle(seekMs, flashStartSeekMs) {
   if (flashStartSeekMs == null) {
     return { opacity: 0, boxShadow: 'none' };
   }
-  const flashElapsedMs = seekMs - flashStartSeekMs;
+  const flashElapsedMs = seekMs - flashStartSeekMs - flashDelayMs;
   if (flashElapsedMs < 0 || flashElapsedMs > flashDurationMs) {
     return { opacity: 0, boxShadow: 'none' };
   }
@@ -654,11 +536,6 @@ function applyTrainBrake(t) {
   }
 
   return 1;
-}
-
-function applyQuinticInOut(t) {
-  const x = clamp01(t);
-  return x * x * x * (x * (x * 6 - 15) + 10);
 }
 
 export function applyNamedEasing(name, t) {

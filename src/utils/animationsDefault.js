@@ -103,6 +103,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
 
     // Final Flash Settings
     finalFlashDurationMs: 1000,
+    finalFlashDelayMs: 200,
     finalFlashMaxOpacity: 0.35,
 
     // Display Tween Settings

@@ -1,5 +1,6 @@
 import React, { memo, useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import ReactEChartsCore from '../utils/echartsReact';
+import ExportDailySpark from './ExportDailySpark';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from 'echarts/components';
@@ -363,15 +364,15 @@ function startSparkZoomLerp(from, to, setZoom, rafRef, ms) {
   };
 }
 
-function buildOverviewDonutRows(rows, getColor) {
+function buildOverviewDonutRows(rows, getColor, { hideLabels = false } = {}) {
   return rows.map((row) => {
     const color = getColor(row.key);
     return {
       name: row.label,
       value: row.tokens,
       itemStyle: { color },
-      label: { show: true, color },
-      labelLine: { show: true },
+      label: { show: !hideLabels, color },
+      labelLine: { show: !hideLabels },
     };
   });
 }
@@ -438,7 +439,7 @@ function DailySpark({
   exportPlayback = false,
   onDayClick,
 }) {
-  const sourceDaily = exportPlayback ? (daily?.dates?.length ? daily : fullDaily) : fullDaily;
+  const sourceDaily = fullDaily || daily;
   if (!sourceDaily?.dates?.length) {
     return (
       <div className="overview-daily-spark overview-daily-spark-empty">
@@ -455,7 +456,7 @@ function DailySpark({
     sourceDaily,
     targetIndex: sourceDaily.dates.length - 1,
   };
-  const displayDaily = exportPlayback ? sourceDaily : resolvedElasticDaily.daily;
+  const displayDaily = resolvedElasticDaily.daily;
   const cursorDrivenZoom = !exportMode && !exportPlayback && isIngestActive;
   const cursorZoomWindow = useMemo(
     () => getSparkZoomWindow(range, displayDaily.dates.length, resolvedElasticDaily.cursor, cursorDrivenZoom),
@@ -798,6 +799,8 @@ export function OverviewFrame({
   exportPlayback = false,
   exportPhase = null,
   exportSeekMs = 0,
+  exportDaily = null,
+  exportDailyTiming = null,
   onDailyDebugStatsChange = null,
   onPresentationDateRangeChange = null,
   onNavigateToDailyDay,
@@ -887,24 +890,6 @@ export function OverviewFrame({
   const maxRepoTokens = Math.max(...chartTopRepos.slice(0, 6).map(row => row.tokens || 0), 1);
   const orderedFamilies = [...chartTopFamilies].sort((a, b) => String(a.label).localeCompare(String(b.label)));
   const orderedModels = [...chartTopModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
-  const exportBarsUpdateDuration = exportPhase === 'tail' || exportPhase === 'final_hold'
-    ? (OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartTailUpdateDurationMs
-      ?? OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs
-      ?? 240)
-    : resolveExportChartUpdateDuration(
-      exportSeekMs,
-      OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartIntroUpdateDurationMs,
-      OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs ?? 30
-    );
-  const exportDonutsUpdateDuration = exportPhase === 'tail' || exportPhase === 'final_hold'
-    ? (OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartTailUpdateDurationMs
-      ?? OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs
-      ?? 240)
-    : resolveExportChartUpdateDuration(
-      exportSeekMs,
-      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartIntroUpdateDurationMs,
-      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs ?? 30
-    );
 
   const chartInteractive = !exportMode && !exportPlayback && !isIngestActive;
 
@@ -913,8 +898,9 @@ export function OverviewFrame({
     ...ECHARTS_OVERVIEW_BARS,
     ...(exportMode ? { animation: false } : {}),
     ...(exportPlayback ? {
-      animationDurationUpdate: exportBarsUpdateDuration,
-      animationEasingUpdate: 'cubicOut',
+      animation: false,
+      animationDuration: 0,
+      animationDurationUpdate: 0,
     } : {}),
     tooltip: {
       trigger: 'axis',
@@ -973,14 +959,16 @@ export function OverviewFrame({
 
   const familyTotal = orderedFamilies.reduce((sum, row) => sum + (row.tokens || 0), 0);
   const visibleFamilyRows = orderedFamilies.filter((row) => (familyTotal > 0 ? ((row.tokens || 0) / familyTotal) >= 0.01 : false));
+  const hideSingleFamilyLabel = exportPlayback && visibleFamilyRows.length === 1;
   const familySingleLabelLayout = buildSingleDonutLabelLayout(visibleFamilyRows);
   const familyOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
     ...(exportMode ? { animation: false } : {}),
     ...(exportPlayback ? {
-      animationDurationUpdate: exportDonutsUpdateDuration,
-      animationEasingUpdate: 'cubicOut',
+      animation: false,
+      animationDuration: 0,
+      animationDurationUpdate: 0,
     } : {}),
     tooltip: {
       trigger: 'item',
@@ -990,12 +978,12 @@ export function OverviewFrame({
     },
     series: [{
       type: 'pie',
-      animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode || exportPlayback ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
       avoidLabelOverlap: !familySingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: {
-        show: true,
+        show: !hideSingleFamilyLabel,
         color: '#8b949e',
         fontSize: 11,
         formatter: '{b}',
@@ -1004,23 +992,25 @@ export function OverviewFrame({
         bleedMargin: 5,
         distanceToLabelLine: 5,
       },
-      labelLine: { lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
+      labelLine: { show: !hideSingleFamilyLabel, lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      ...(familySingleLabelLayout ? { labelLayout: familySingleLabelLayout } : {}),
-      data: buildOverviewDonutRows(visibleFamilyRows, getFamilyColor),
+      ...(!hideSingleFamilyLabel && familySingleLabelLayout ? { labelLayout: familySingleLabelLayout } : {}),
+      data: buildOverviewDonutRows(visibleFamilyRows, getFamilyColor, { hideLabels: hideSingleFamilyLabel }),
     }],
   };
 
   const modelTotal = orderedModels.reduce((sum, row) => sum + (row.tokens || 0), 0);
   const visibleModelRows = orderedModels.filter((row) => (modelTotal > 0 ? ((row.tokens || 0) / modelTotal) >= 0.01 : false));
+  const hideSingleModelLabel = exportPlayback && visibleModelRows.length === 1;
   const modelSingleLabelLayout = buildSingleDonutLabelLayout(visibleModelRows);
   const modelOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
     ...(exportMode ? { animation: false } : {}),
     ...(exportPlayback ? {
-      animationDurationUpdate: exportDonutsUpdateDuration,
-      animationEasingUpdate: 'cubicOut',
+      animation: false,
+      animationDuration: 0,
+      animationDurationUpdate: 0,
     } : {}),
     tooltip: {
       trigger: 'item',
@@ -1030,12 +1020,12 @@ export function OverviewFrame({
     },
     series: [{
       type: 'pie',
-      animation: exportMode ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode || exportPlayback ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
       avoidLabelOverlap: !modelSingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
       label: {
-        show: true,
+        show: !hideSingleModelLabel,
         color: '#8b949e',
         fontSize: 11,
         formatter: '{b}',
@@ -1044,10 +1034,10 @@ export function OverviewFrame({
         bleedMargin: 5,
         distanceToLabelLine: 5,
       },
-      labelLine: { lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
+      labelLine: { show: !hideSingleModelLabel, lineStyle: { color: '#30363d' }, length: 8, length2: 6 },
       itemStyle: { borderColor: '#161b22', borderWidth: 2 },
-      ...(modelSingleLabelLayout ? { labelLayout: modelSingleLabelLayout } : {}),
-      data: buildOverviewDonutRows(visibleModelRows, getModelColor),
+      ...(!hideSingleModelLabel && modelSingleLabelLayout ? { labelLayout: modelSingleLabelLayout } : {}),
+      data: buildOverviewDonutRows(visibleModelRows, getModelColor, { hideLabels: hideSingleModelLabel }),
     }],
   };
 
@@ -1087,17 +1077,25 @@ export function OverviewFrame({
             <div className="stat-per-day"><span className="stat-per-day-value">{(stats.sessions / stats.days).toFixed(1)}</span> per day</div>
           </div>
         </div>
-        <DailySpark
-          daily={sparkDailyInput}
-          fullDaily={fullDaily}
-          elasticDaily={elasticDaily}
-          range={range}
-          isIngestActive={isIngestActive}
-          currentDateBucket={currentDateBucket}
-          exportMode={exportMode}
-          exportPlayback={exportPlayback}
-          onDayClick={chartInteractive ? onNavigateToDailyDay : undefined}
-        />
+        {exportPlayback ? (
+          <ExportDailySpark
+            daily={exportDaily || fullDaily || sparkDailyInput}
+            seekMs={exportSeekMs}
+            timing={exportDailyTiming}
+          />
+        ) : (
+          <DailySpark
+            daily={sparkDailyInput}
+            fullDaily={fullDaily}
+            elasticDaily={elasticDaily}
+            range={range}
+            isIngestActive={isIngestActive}
+            currentDateBucket={currentDateBucket}
+            exportMode={exportMode}
+            exportPlayback={exportPlayback}
+            onDayClick={chartInteractive ? onNavigateToDailyDay : undefined}
+          />
+        )}
       </div>
 
       <Heatmap
@@ -1119,7 +1117,7 @@ export function OverviewFrame({
               style={{ height: 180, cursor: repoChartEvents ? 'pointer' : undefined }}
               theme="dark"
               lazyUpdate={false}
-              notMerge={exportMode}
+              notMerge={exportMode || exportPlayback}
               onEvents={repoChartEvents}
             />
           ) : (
@@ -1129,7 +1127,7 @@ export function OverviewFrame({
         <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode} />
+            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode || exportPlayback} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -1143,7 +1141,7 @@ export function OverviewFrame({
               style={{ height: 180, cursor: modelChartEvents ? 'pointer' : undefined }}
               theme="dark"
               lazyUpdate={false}
-              notMerge={exportMode}
+              notMerge={exportMode || exportPlayback}
               onEvents={modelChartEvents}
             />
           ) : (
@@ -1252,13 +1250,6 @@ function areOverviewPropsEqual(prev, next) {
 }
 
 export default memo(Overview, areOverviewPropsEqual);
-
-function resolveExportChartUpdateDuration(seekMs, introDurationMs, steadyDurationMs) {
-  const intro = Math.max(introDurationMs ?? steadyDurationMs ?? 0, steadyDurationMs ?? 0);
-  const steady = Math.max(steadyDurationMs ?? 0, 0);
-  const eased = resolveExportChartIntroBlend(seekMs);
-  return Math.round(intro + ((steady - intro) * eased));
-}
 
 function resolveExportChartIntroProgress(seekMs) {
   return resolveExportChartIntroBlend(seekMs);
