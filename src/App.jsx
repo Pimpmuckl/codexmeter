@@ -6,7 +6,8 @@ import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
 import OverviewVideoExport from './components/OverviewVideoExport';
-import { buildLiveDataEnvelope, mergeLiveEvent } from './live-state';
+import { buildLiveDataEnvelope, buildLiveStateFromSettled, mergeLiveEvent } from './live-state';
+import { debugLive, summarizeLivePayload, summarizeLiveState } from './utils/liveDebug';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
@@ -37,6 +38,11 @@ const PHASE_LABELS = {
   error: 'Error',
 };
 
+function hasInitialLiveDailyData(liveState) {
+  const rows = Object.values(liveState?.daily || {});
+  return rows.filter((row) => (row?.tokens || 0) > 0 || (row?.sessions || 0) > 0).length >= 7;
+}
+
 export default function App() {
   const search = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const exportMode = search?.get('export');
@@ -52,6 +58,7 @@ export default function App() {
   const [liveState, setLiveState] = useState(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [fadingOut, setFadingOut] = useState(false);
+  const [initialLiveReady, setInitialLiveReady] = useState(false);
   const [ingestFadeOut, setIngestFadeOut] = useState(false);
   const [ingestFadeDone, setIngestFadeDone] = useState(false);
   const [rerunning, setRerunning] = useState(false);
@@ -180,6 +187,7 @@ export default function App() {
     let liveStateRef = null;
     let progressRef = null;
     let sseFallbackTimer = null;
+    let initialLiveReadyReported = false;
 
     const clearSseFallbackTimer = () => {
       if (!sseFallbackTimer) return;
@@ -205,6 +213,16 @@ export default function App() {
         }
       }
 
+      debugLive('apply', {
+        events: queuedEvents.map((event) => ({
+          mode: event.mode,
+          progressOnly: event.progressOnly,
+          seq: event.payload?.seq,
+        })),
+        progress: nextProgress,
+        state: summarizeLiveState(nextLiveState, nextProgress),
+      });
+
       queuedEvents = [];
       if (nextProgress !== progressRef) {
         progressRef = nextProgress;
@@ -213,10 +231,20 @@ export default function App() {
       if (nextLiveState !== liveStateRef) {
         liveStateRef = nextLiveState;
         setLiveState(nextLiveState);
+        if (!initialLiveReadyReported && hasInitialLiveDailyData(nextLiveState)) {
+          initialLiveReadyReported = true;
+          setInitialLiveReady(true);
+          debugLive('initial-live-ready', summarizeLiveState(nextLiveState, nextProgress));
+        }
       }
     };
 
     const enqueueLivePayload = (payload, mode, progressOnly = false) => {
+      debugLive('receive', {
+        mode,
+        progressOnly,
+        payload: summarizeLivePayload(payload),
+      });
       queuedEvents.push({ payload, mode, progressOnly });
       clearSseFallbackTimer();
       if (!frameId) {
@@ -224,10 +252,24 @@ export default function App() {
       }
     };
 
-    const ensureSettledDataLoaded = async (nextProgress, ingestId = null) => {
+    const hydrateLiveStateFromSettled = (nextData, ingestId = null, seq = 0) => {
+      const settledLiveState = buildLiveStateFromSettled(
+        nextData,
+        ingestId,
+        Math.max((liveStateRef?.seq || 0) + 1, seq, 1)
+      );
+      liveStateRef = settledLiveState;
+      setLiveState(settledLiveState);
+    };
+
+    const ensureSettledDataLoaded = async (nextProgress, ingestId = null, { hydrateLiveState = false, seq = 0 } = {}) => {
       if (!alive || !nextProgress?.complete || settledFetchStarted) return;
       settledFetchStarted = true;
-      await fetchAll();
+      const nextData = await fetchAll();
+      if (alive && hydrateLiveState) {
+        hydrateLiveStateFromSettled(nextData, ingestId, seq);
+      }
+      return nextData;
     };
 
     const startFallbackPolling = () => {
@@ -240,7 +282,7 @@ export default function App() {
           if (!alive) return;
           setProgress(p);
 
-          if (p.percent > 0.1) {
+          if (p.percent > 0.08) {
             await fetchAll();
           }
 
@@ -296,12 +338,21 @@ export default function App() {
         enqueueLivePayload(payload, 'patch');
       });
 
+      source.addEventListener('snapshot', (event) => {
+        if (!alive) return;
+        const payload = JSON.parse(event.data);
+        enqueueLivePayload(payload, 'snapshot');
+      });
+
       source.addEventListener('complete', async (event) => {
         if (!alive) return;
         const payload = JSON.parse(event.data);
         terminalSseState = true;
-        enqueueLivePayload(payload, 'progress', true);
-        await ensureSettledDataLoaded(payload.progress, payload.ingest_id);
+        enqueueLivePayload(payload, payload.data ? 'complete' : 'progress', !payload.data);
+        await ensureSettledDataLoaded(payload.progress, payload.ingest_id, {
+          hydrateLiveState: true,
+          seq: (payload.seq || 0) + 1,
+        });
         if (!alive) return;
         source?.close();
       });
@@ -348,7 +399,8 @@ export default function App() {
 
   useEffect(() => {
     if (!progress) return;
-    if (progress.percent > 0.1 && showOverlay && !fadingOut) {
+    const hasLiveOrEnoughProgress = initialLiveReady || progress.percent > 0.08;
+    if (hasLiveOrEnoughProgress && showOverlay && !fadingOut) {
       setFadingOut(true);
       const timer = setTimeout(() => setShowOverlay(false), 600);
       return () => clearTimeout(timer);
@@ -358,7 +410,7 @@ export default function App() {
       const timer = setTimeout(() => setShowOverlay(false), 600);
       return () => clearTimeout(timer);
     }
-  }, [progress, showOverlay, fadingOut]);
+  }, [progress, initialLiveReady, showOverlay, fadingOut]);
 
   const backendComplete = Boolean(progress?.complete);
   const complete = backendComplete;
@@ -444,12 +496,14 @@ export default function App() {
   const liveData = useMemo(() => (
     liveState ? buildLiveDataEnvelope(liveState) : null
   ), [liveState]);
-  const overviewData = liveData ? liveData.overview : data.overview;
-  const overviewHeatmap = liveData ? liveData.heatmap : data.heatmap;
-  const overviewDaily = liveData ? liveData.daily : data.daily;
-  const overviewFamilies = liveData ? liveData.families : data.families;
-  const overviewRepos = liveData ? liveData.repos : data.repos;
-  const overviewModels = liveData ? liveData.models : data.models;
+  const settledOverviewReady = Boolean(data.overview?.complete && data.overview?.data);
+  const useLiveData = Boolean(liveData && !settledOverviewReady);
+  const overviewData = useLiveData ? liveData.overview : (data.overview || liveData?.overview);
+  const overviewHeatmap = useLiveData ? liveData.heatmap : (data.heatmap || liveData?.heatmap);
+  const overviewDaily = useLiveData ? liveData.daily : (data.daily || liveData?.daily);
+  const overviewFamilies = useLiveData ? liveData.families : (data.families || liveData?.families);
+  const overviewRepos = useLiveData ? liveData.repos : (data.repos || liveData?.repos);
+  const overviewModels = useLiveData ? liveData.models : (data.models || liveData?.models);
 
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
@@ -648,6 +702,7 @@ export default function App() {
               onPresentationSettledChange={setOverviewPresentationSettled}
               ingestProgress={overviewIngestProgress}
               isIngestActive={overviewIngestActive}
+              currentDateBucket={progress?.current_date_bucket || null}
               onNavigateToDailyDay={handleNavigateToDailyDay}
               onNavigateToRepo={handleNavigateToRepo}
               onNavigateToModel={handleNavigateToModel}

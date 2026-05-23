@@ -36,7 +36,7 @@ export function beginReplayCapture(replay, ingestId, bootstrapPayload) {
 
 export function recordReplayEvent(replay, event, payload) {
   if (!replay?.active) return;
-  if (!['progress', 'patch', 'complete'].includes(event)) return;
+  if (!['progress', 'patch', 'snapshot', 'complete'].includes(event)) return;
   replay.events.push({
     event,
     at_ms: Math.max(0, Date.now() - replay.started_at_ms),
@@ -73,7 +73,7 @@ export function getReplaySnapshot(replay) {
     events: rest.map((event) => ({
       event: event.event,
       at_ms: event.at_ms,
-      mode: event.event === 'patch' ? 'patch' : 'progress',
+      mode: event.event === 'patch' || event.event === 'snapshot' ? event.event : 'progress',
       payload: clonePayload(event.payload),
     })),
   };

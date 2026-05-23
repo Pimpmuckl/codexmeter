@@ -79,6 +79,17 @@ export function buildLiveBootstrap(live) {
   };
 }
 
+export function buildLiveSnapshot(live) {
+  return {
+    overview: serializeOverview(live),
+    repos: serializeTopRanges(live.repos, live.repoTopKeys, serializeRepoSummary),
+    models: serializeTopRanges(live.models, live.modelTopKeys, serializeModelSummary),
+    families: serializeTopRanges(live.families, live.familyTopKeys, serializeFamilySummary),
+    daily: serializeDailySnapshot(live.daily),
+    heatmap: serializeHeatmap(live.heatmap),
+  };
+}
+
 export function buildLivePatch(live, patch) {
   return {
     overview: Object.fromEntries(
@@ -464,6 +475,10 @@ function serializeDaily(dayMap) {
   return Object.fromEntries([...dayMap.entries()].map(([dayKey, value]) => [dayKey, serializeDailyEntry(value)]));
 }
 
+function serializeDailySnapshot(dayMap) {
+  return Object.fromEntries([...dayMap.entries()].map(([dayKey, value]) => [dayKey, serializeDailySnapshotEntry(value)]));
+}
+
 function serializeDailyEntry(value) {
   return {
     tokens: Math.round(value?.tokens || 0),
@@ -473,6 +488,17 @@ function serializeDailyEntry(value) {
     by_model: deepRoundClone(value?.by_model || {}, ['tokens', 'cost', 'elapsed_seconds']),
     by_family: deepRoundClone(value?.by_family || {}, ['tokens', 'cost', 'elapsed_seconds', 'sessions']),
     by_repo: deepRoundClone(value?.by_repo || {}, ['tokens', 'cost', 'elapsed_seconds', 'sessions']),
+    approximate: true,
+  };
+}
+
+function serializeDailySnapshotEntry(value) {
+  return {
+    tokens: Math.round(value?.tokens || 0),
+    cost: value?.cost || 0,
+    elapsed_seconds: Math.round(value?.elapsed_seconds || 0),
+    sessions: value?.sessions || 0,
+    by_model: deepRoundClone(value?.by_model || {}, ['tokens', 'cost', 'elapsed_seconds']),
     approximate: true,
   };
 }

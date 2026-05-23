@@ -7,12 +7,12 @@ export function createExportSimulation(renderData) {
   const bootstrapProgress = cloneProgress(bootstrapPayload.progress || { percent: 0, complete: false });
   const bootstrapLiveState = mergeLiveEvent(null, bootstrapPayload, 'bootstrap');
   const events = renderData.replay?.events || [];
-  const firstPatchIndex = events.findIndex((event) => event.event === 'patch');
-  const firstPatchAtMs = firstPatchIndex >= 0 ? events[firstPatchIndex].at_ms || 0 : 0;
+  const firstDataIndex = events.findIndex(isReplayDataEvent);
+  const firstDataAtMs = firstDataIndex >= 0 ? events[firstDataIndex].at_ms || 0 : 0;
   const keyframes = buildPresentationKeyframes(renderData, bootstrapLiveState, events);
   const initialPresentation = keyframes[0]?.presentation || emptyPresentationTarget();
-  const initialProgress = firstPatchIndex >= 0
-    ? cloneProgress(events[firstPatchIndex].payload?.progress || bootstrapProgress)
+  const initialProgress = firstDataIndex >= 0
+    ? cloneProgress(events[firstDataIndex].payload?.progress || bootstrapProgress)
     : cloneProgress(bootstrapProgress);
 
   const startHoldDurationMs = Math.max(renderData.startHoldDurationMs || 0, 0);
@@ -25,7 +25,7 @@ export function createExportSimulation(renderData) {
     1
   );
   const sourceDurationMs = Math.max(renderData.replay?.duration_ms || 0, 0);
-  const sourceStartMs = Math.min(Math.max(firstPatchAtMs, 0), sourceDurationMs);
+  const sourceStartMs = Math.min(Math.max(firstDataAtMs, 0), sourceDurationMs);
   const effectiveSourceDurationMs = Math.max(1, sourceDurationMs - sourceStartMs);
   const tailSourceFraction = clamp01(renderData.tailSourceFraction ?? 0.035);
   const tailSourceDurationMs = Math.max(1, Math.round(effectiveSourceDurationMs * tailSourceFraction));
@@ -293,8 +293,8 @@ function buildPresentationKeyframes(renderData, bootstrapLiveState, events) {
   let liveState = bootstrapLiveState;
 
   for (const event of events) {
-    if (event.event !== 'patch') continue;
-    liveState = mergeLiveEvent(liveState, event.payload, 'patch');
+    if (!isReplayDataEvent(event)) continue;
+    liveState = mergeLiveEvent(liveState, event.payload, event.event);
     keyframes.push({
       at_ms: Math.max(0, event.at_ms || 0),
       presentation: buildOverviewPresentationTarget({
@@ -314,6 +314,14 @@ function buildPresentationKeyframes(renderData, bootstrapLiveState, events) {
   }
 
   return keyframes;
+}
+
+function isReplayDataEvent(event) {
+  return event?.payload?.data && (
+    event.event === 'patch' ||
+    event.event === 'snapshot' ||
+    event.event === 'complete'
+  );
 }
 
 function samplePresentationAtSource(sim, sourceMs) {

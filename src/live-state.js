@@ -12,7 +12,8 @@ export function createEmptyLiveClientState() {
 }
 
 export function mergeLiveEvent(prev, payload, mode) {
-  const next = mode === 'bootstrap' || !prev || prev.ingest_id !== payload.ingest_id
+  const replacesState = mode === 'bootstrap' || mode === 'snapshot' || mode === 'complete';
+  const next = replacesState || !prev || prev.ingest_id !== payload.ingest_id
     ? createEmptyLiveClientState()
     : { ...prev };
 

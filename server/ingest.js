@@ -7,7 +7,7 @@ import {
 import { calculateCostFromUsage, initPricing, priceSession } from './cost-catalog.js';
 import { buildAggregates, buildSessionView } from './aggregator.js';
 import { createDayKeyFormatter } from './day-key.js';
-import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap, buildLivePatch } from './live-state.js';
+import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLivePatch, buildLiveSnapshot } from './live-state.js';
 import { createRolloutWorkerPool } from './rollout-worker-pool.js';
 import { beginReplayCapture, createReplayCaptureState, failReplayCapture, getReplaySnapshot, recordReplayEvent, resetReplayCapture } from './export-replay.js';
 import { findUsageEntryAtOrBefore, hasUsageTotals, readUsageTimeline, subtractUsageTotals } from './rollout-reader.js';
@@ -17,17 +17,11 @@ const LIVE_FRAME_INTERVAL_MS = Math.max(
   16,
   Math.round(Number(OVERVIEW_INGEST_ANIMATION.live?.frameIntervalMs) || 50)
 );
-const LIVE_DAYS_PER_SECOND = 6;
-const LIVE_OVERVIEW_HZ = Math.max(
+const LIVE_SNAPSHOT_HZ = Math.max(
   1,
-  Number(OVERVIEW_INGEST_ANIMATION.live?.overviewHz) || 10
+  Number(OVERVIEW_INGEST_ANIMATION.live?.snapshotHz) || 10
 );
-const LIVE_OVERVIEW_CADENCE_MS = Math.round(1000 / LIVE_OVERVIEW_HZ);
-const LIVE_DAY_KEYS_PER_EMIT = Math.max(
-  1,
-  Math.round(Number(OVERVIEW_INGEST_ANIMATION.live?.dayKeysPerEmit) || 1)
-);
-const LIVE_SESSION_REORDER_BUFFER = 160;
+const LIVE_SNAPSHOT_CADENCE_MS = Math.round(1000 / LIVE_SNAPSHOT_HZ);
 
 export function createIngestState() {
   return {
@@ -51,10 +45,9 @@ export function createIngestState() {
     live_subscribers: new Set(),
     live_pump_timer: null,
     live_pending_patch: createEmptyLivePatch(),
-    live_session_buffer: [],
     live_progress_dirty: false,
     live_last_emit_at: 0,
-    live_last_overview_emit_at: 0,
+    live_last_snapshot_emit_at: 0,
     replay_capture: createReplayCaptureState(),
   };
 }
@@ -88,7 +81,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       ingest_id: state.ingest_id,
       seq: 0,
       progress: progressPayload(state),
-      data: buildLiveBootstrap(state.live_state),
+      data: buildLiveSnapshot(state.live_state),
     });
     queueLiveProgress(state);
     broadcastBootstrap(state);
@@ -154,7 +147,7 @@ export async function runIngest(codexHome, state, opts = {}) {
     const bootstrapCandidates = sessions.filter((session) => !session.rollout_path);
     if (bootstrapCandidates.length) {
       assignRootThreadIds(sessions);
-      const bootstrapSessions = filterVisibleSessions(bootstrapCandidates);
+      const bootstrapSessions = filterLiveSessions(bootstrapCandidates, opts);
       const bootstrapPatch = createEmptyLivePatch();
       for (const session of bootstrapSessions) {
         finalizeSessionMetrics(session, toDayKey);
@@ -253,13 +246,10 @@ export async function runIngest(codexHome, state, opts = {}) {
         assignRootThreadIds(sessions);
         lastRootRefreshCount = enrichedCount;
       }
-      const liveReady = bufferLiveSessionsForPresentation(state, batch);
-      state.current_date_bucket = pickVisibleDateBucket(
-        filterVisibleSessions(state.live_session_buffer),
-        filterVisibleSessions(liveReady)
-      );
+      const liveReady = filterLiveSessions(batch, opts);
+      state.current_date_bucket = pickVisibleDateBucket([], liveReady);
       const livePatch = createEmptyLivePatch();
-      for (const session of filterVisibleSessions(liveReady)) {
+      for (const session of liveReady) {
         applySessionToLiveState(state.live_state, session, livePatch);
       }
       queueLivePatch(state, livePatch);
@@ -313,8 +303,9 @@ export async function runIngest(codexHome, state, opts = {}) {
     }
 
     assignRootThreadIds(sessions);
+    state.live_state = createLiveAggregateState(tz);
     const finalLivePatch = createEmptyLivePatch();
-    for (const session of filterVisibleSessions(flushBufferedLiveSessions(state))) {
+    for (const session of filterLiveSessions(sessions, opts)) {
       applySessionToLiveState(state.live_state, session, finalLivePatch);
     }
     queueLivePatch(state, finalLivePatch);
@@ -374,10 +365,9 @@ export function restartIngest(codexHome, state, opts = {}) {
   state.live_state = null;
   state.live_seq = 0;
   state.live_pending_patch = createEmptyLivePatch();
-  state.live_session_buffer = [];
   state.live_progress_dirty = false;
   state.live_last_emit_at = 0;
-  state.live_last_overview_emit_at = 0;
+  state.live_last_snapshot_emit_at = 0;
   resetReplayCapture(state.replay_capture);
 
   return runIngest(codexHome, state, opts);
@@ -395,6 +385,10 @@ function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
 
 export function filterVisibleSessions(sessions) {
   return sessions.filter((session) => !isReviewLauncherSession(session));
+}
+
+function filterLiveSessions(sessions, opts) {
+  return applyFilters(filterVisibleSessions(sessions), opts);
 }
 
 export function selectEnrichmentCandidates(sessions, opts = {}) {
@@ -712,29 +706,6 @@ function deriveLiveSortDay(session, toDayKey) {
   return null;
 }
 
-function compareLiveSessionOrder(a, b) {
-  const dayCompare = String(a.live_sort_day || '9999-12-31').localeCompare(String(b.live_sort_day || '9999-12-31'));
-  if (dayCompare !== 0) return dayCompare;
-  const liveTsCompare = (a.live_sort_ts || a.started_at || 0) - (b.live_sort_ts || b.started_at || 0);
-  if (liveTsCompare !== 0) return liveTsCompare;
-  return String(a.thread_id || '').localeCompare(String(b.thread_id || ''));
-}
-
-function bufferLiveSessionsForPresentation(state, sessions) {
-  if (!sessions.length) return [];
-  state.live_session_buffer.push(...sessions);
-  state.live_session_buffer.sort(compareLiveSessionOrder);
-  const flushCount = Math.max(0, state.live_session_buffer.length - LIVE_SESSION_REORDER_BUFFER);
-  if (flushCount <= 0) return [];
-  return state.live_session_buffer.splice(0, flushCount);
-}
-
-function flushBufferedLiveSessions(state) {
-  if (!state.live_session_buffer.length) return [];
-  state.live_session_buffer.sort(compareLiveSessionOrder);
-  return state.live_session_buffer.splice(0, state.live_session_buffer.length);
-}
-
 function queueLiveProgress(state) {
   state.live_progress_dirty = true;
   ensureLivePump(state);
@@ -788,11 +759,15 @@ function flushLive(state, forcedEvent = null) {
     }
   }
 
-  const flushablePatch = forcedEvent ? takeAllPendingPatch(state) : takeFlushablePatch(state);
-  const patchEmpty = isPatchEmpty(flushablePatch);
-  const pendingPatchEmpty = isPatchEmpty(state.live_pending_patch);
-  const shouldEmitComplete = !forcedEvent && patchEmpty && pendingPatchEmpty && state.presentation_complete_pending;
-  const event = forcedEvent || (shouldEmitComplete ? 'complete' : (!patchEmpty ? 'patch' : 'progress'));
+  const patchPending = !isPatchEmpty(state.live_pending_patch);
+  const readyForSnapshot = forcedEvent || (patchPending && readyForSnapshotEmit(state, Date.now()));
+  if (!forcedEvent && !readyForSnapshot && !state.live_progress_dirty && !state.presentation_complete_pending) {
+    return;
+  }
+
+  const flushablePatch = readyForSnapshot ? takeAllPendingPatch(state) : createEmptyLivePatch();
+  const shouldEmitComplete = !forcedEvent && state.presentation_complete_pending;
+  const event = forcedEvent || (shouldEmitComplete ? 'complete' : (readyForSnapshot ? 'snapshot' : 'progress'));
 
   if (shouldEmitComplete) {
     state.phase = 'complete';
@@ -807,10 +782,10 @@ function flushLive(state, forcedEvent = null) {
     progress: progressPayload(state),
   };
 
-  if (event === 'patch') {
+  if (event === 'snapshot' || event === 'complete') {
+    payload.data = buildLiveSnapshot(state.live_state);
+  } else if (event === 'patch') {
     payload.data = buildLivePatch(state.live_state, flushablePatch);
-  } else if (event === 'bootstrap') {
-    payload.data = buildLiveBootstrap(state.live_state);
   }
 
   recordReplayEvent(state.replay_capture, event, payload);
@@ -818,8 +793,13 @@ function flushLive(state, forcedEvent = null) {
     broadcastLive(state, event, payload);
   }
   state.live_last_emit_at = Date.now();
-  state.live_progress_dirty = shouldEmitComplete ? false : (event === 'progress' ? false : state.live_progress_dirty);
-  if (forcedEvent) {
+  if (event === 'snapshot' || event === 'complete') {
+    state.live_last_snapshot_emit_at = state.live_last_emit_at;
+  }
+  state.live_progress_dirty = event === 'progress' || event === 'snapshot' || event === 'complete'
+    ? false
+    : state.live_progress_dirty;
+  if (forcedEvent || event === 'complete') {
     state.live_pending_patch = createEmptyLivePatch();
   }
   stopLivePumpIfIdle(state);
@@ -860,52 +840,8 @@ function isPatchEmpty(patch) {
     patch.heatmap.size === 0;
 }
 
-function takeFlushablePatch(state) {
-  const now = Date.now();
-  const sent = createEmptyLivePatch();
-
-  const overviewDirty =
-    state.live_pending_patch.overview.size > 0 ||
-    state.live_pending_patch.repos.total.size > 0 || state.live_pending_patch.repos.d7.size > 0 || state.live_pending_patch.repos.d30.size > 0 ||
-    state.live_pending_patch.models.total.size > 0 || state.live_pending_patch.models.d7.size > 0 || state.live_pending_patch.models.d30.size > 0 ||
-    state.live_pending_patch.families.total.size > 0 || state.live_pending_patch.families.d7.size > 0 || state.live_pending_patch.families.d30.size > 0 ||
-    state.live_pending_patch.daily.size > 0 || state.live_pending_patch.heatmap.size > 0;
-
-  if (!overviewDirty || !readyForOverview(state, now)) {
-    return sent;
-  }
-
-  moveSet(state.live_pending_patch.overview, sent.overview);
-  moveRangeSets(state.live_pending_patch.repos, sent.repos);
-  moveRangeSets(state.live_pending_patch.models, sent.models);
-  moveRangeSets(state.live_pending_patch.families, sent.families);
-
-  const nextDayKeys = takeNextChronologicalDayKeys(
-    state.live_pending_patch.daily,
-    state.live_pending_patch.heatmap,
-    LIVE_DAY_KEYS_PER_EMIT
-  );
-  moveSpecificKeys(state.live_pending_patch.daily, sent.daily, nextDayKeys);
-  moveSpecificKeys(state.live_pending_patch.heatmap, sent.heatmap, nextDayKeys);
-  state.live_last_overview_emit_at = now;
-
-  return sent;
-}
-
-function readyForOverview(state, now) {
-  return (now - state.live_last_overview_emit_at) >= getOverviewCadenceMs(state);
-}
-
-function getOverviewCadenceMs(state) {
-  const tail = OVERVIEW_INGEST_ANIMATION.tail;
-  const tailStartPercent = Math.min(Math.max(tail?.startPercent ?? 0.95, 0), 0.999);
-  const tailHz = Number.isFinite(tail?.overviewHz) && tail.overviewHz > 0 ? tail.overviewHz : 5;
-  const tailCadenceMs = Math.round(1000 / tailHz);
-
-  if (tail?.enabled && (state.presentation_complete_pending || (state.percent || 0) >= tailStartPercent)) {
-    return tailCadenceMs;
-  }
-  return LIVE_OVERVIEW_CADENCE_MS;
+function readyForSnapshotEmit(state, now) {
+  return (now - state.live_last_snapshot_emit_at) >= LIVE_SNAPSHOT_CADENCE_MS;
 }
 
 function moveSet(from, to) {
@@ -928,21 +864,6 @@ function takeAllPendingPatch(state) {
   moveSet(state.live_pending_patch.daily, sent.daily);
   moveSet(state.live_pending_patch.heatmap, sent.heatmap);
   return sent;
-}
-
-function moveSpecificKeys(from, to, keys) {
-  for (const key of keys) {
-    if (!from.has(key)) continue;
-    from.delete(key);
-    to.add(key);
-  }
-}
-
-function takeNextChronologicalDayKeys(dailySet, heatmapSet, limit) {
-  const allKeys = new Set([...dailySet, ...heatmapSet]);
-  return [...allKeys]
-    .sort((a, b) => String(a).localeCompare(String(b)))
-    .slice(0, limit);
 }
 
 function progressPayload(state) {
@@ -972,7 +893,7 @@ export function attachLiveSubscriber(state, res) {
     ingest_id: state.ingest_id,
     seq: ++state.live_seq,
     progress: progressPayload(state),
-    data: buildLiveBootstrap(state.live_state || createLiveAggregateState(Intl.DateTimeFormat().resolvedOptions().timeZone)),
+    data: buildLiveSnapshot(state.live_state || createLiveAggregateState(Intl.DateTimeFormat().resolvedOptions().timeZone)),
   };
   res.write(`event: bootstrap\ndata: ${JSON.stringify(payload)}\n\n`);
 }
@@ -992,7 +913,7 @@ function broadcastBootstrap(state) {
     ingest_id: state.ingest_id,
     seq: ++state.live_seq,
     progress: progressPayload(state),
-    data: buildLiveBootstrap(state.live_state || createLiveAggregateState(Intl.DateTimeFormat().resolvedOptions().timeZone)),
+    data: buildLiveSnapshot(state.live_state || createLiveAggregateState(Intl.DateTimeFormat().resolvedOptions().timeZone)),
   };
   broadcastLive(state, 'bootstrap', payload);
 }

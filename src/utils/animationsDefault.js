@@ -6,7 +6,7 @@ const AUTO = 'auto';
  * This is the single source of truth for:
  * - Overview client-side presentation timing
  * - Overview ECharts timing defaults
- * - Overview server-side tail pacing
+ * - Overview live snapshot transport cadence
  *
  * `speed` scales the main timings:
  * - `1` = baseline
@@ -21,8 +21,7 @@ export const OVERVIEW_INGEST_ANIMATION = {
   speed: 1,
   live: {
     frameIntervalMs: 33,
-    overviewHz: 20,
-    dayKeysPerEmit: 8,
+    snapshotHz: 12,
   },
   main: {
     presentationDurationMs: 220,
@@ -42,8 +41,6 @@ export const OVERVIEW_INGEST_ANIMATION = {
     durationScale: 10,
     // Shared easing applied by the Overview presentation animator during the tail.
     easing: 'cubicOut',
-    // Backend Overview live-update cadence during the tail, in patches per second.
-    overviewHz: 20,
   },
   daily: {
     chartAppearDurationMs: AUTO,
