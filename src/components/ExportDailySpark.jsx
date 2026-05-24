@@ -42,6 +42,9 @@ export default function ExportDailySpark({ daily, seekMs = 0, timing = null }) {
                   const isBottom = segmentIndex === 0;
                   const isTop = segmentIndex === stack.segments.length - 1;
                   const showDecoration = barWidth >= 3 && segment.heightPx >= 3;
+                  const borderRadius = showDecoration
+                    ? resolveSegmentRadius({ isTop, isBottom, segmentCount: stack.segments.length })
+                    : 0;
                   return (
                     <span
                       key={segment.key}
@@ -50,8 +53,8 @@ export default function ExportDailySpark({ daily, seekMs = 0, timing = null }) {
                         bottom: `${segment.bottomPct}%`,
                         height: `${segment.heightPct}%`,
                         background: segment.color,
-                        borderRadius: showDecoration ? resolveSegmentRadius(isTop, isBottom) : 0,
-                        boxShadow: showDecoration && !isBottom ? '0 -1px 0 rgba(6, 8, 15, 0.45)' : undefined,
+                        borderRadius,
+                        boxShadow: showDecoration && isTop && !isBottom ? '0 -1px 0 rgba(6, 8, 15, 0.45)' : undefined,
                       }}
                     />
                   );
@@ -91,10 +94,10 @@ function buildExportStacks(frame) {
   });
 }
 
-function resolveSegmentRadius(isTop, isBottom) {
+function resolveSegmentRadius({ isTop, isBottom, segmentCount }) {
   if (isTop && isBottom) return '2px';
+  if (segmentCount > 1 && !isTop) return 0;
   if (isTop) return '2px 2px 0 0';
-  if (isBottom) return '0 0 2px 2px';
   return 0;
 }
 
