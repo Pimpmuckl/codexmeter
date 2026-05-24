@@ -1,5 +1,7 @@
 const EXPORT_DAILY_WINDOW_DAYS = 7;
 const EXPORT_DAILY_CHART_WIDTH_PX = 304;
+const EXPORT_DAILY_REVEAL_LEAD_DAYS = 0.18;
+const EXPORT_DAILY_REVEAL_SPAN_DAYS = 1.35;
 
 export function buildExportDailySparkFrame(daily, {
   seekMs = 0,
@@ -41,7 +43,7 @@ export function buildExportDailySparkFrame(daily, {
     ...sourceSeries,
     data: visibleDates.map((_, index) => [
       index,
-      Math.max(0, Number(sourceSeries.data?.[index]) || 0) * revealFactorForIndex(index, progress),
+      Math.max(0, Number(sourceSeries.data?.[index]) || 0) * revealFactorForIndex(index, progress, dates.length),
     ]),
   }));
 
@@ -120,8 +122,10 @@ function buildDayDurations(dayCount, motionDurationMs) {
   return weights.map((weight) => weight * baseMs);
 }
 
-function revealFactorForIndex(index, progress) {
-  return easeOutSoft(clamp01(progress - index));
+function revealFactorForIndex(index, progress, dayCount) {
+  if (progress <= 0) return 0;
+  if (progress >= dayCount) return 1;
+  return easeOutSoft(clamp01((progress - index + EXPORT_DAILY_REVEAL_LEAD_DAYS) / EXPORT_DAILY_REVEAL_SPAN_DAYS));
 }
 
 function computeStackMax(daily, startIndex, endIndex) {

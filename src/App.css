@@ -472,7 +472,7 @@ body {
   position: absolute;
   bottom: 0;
   height: 100%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
 }
 .overview-daily-spark-segment {
   position: absolute;

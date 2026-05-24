@@ -23,7 +23,7 @@ export default function ExportDailySpark({ daily, seekMs = 0, timing = null }) {
 
   const stacks = buildExportStacks(frame);
   const xSpan = Math.max(1, frame.xMax - frame.xMin);
-  const barWidth = Math.max(1, Math.min(frame.barMaxWidth || frame.barWidth || 1, frame.barWidth || 1));
+  const barWidth = snapHalf(Math.max(2, Math.min(frame.barMaxWidth || frame.barWidth || 2, frame.barWidth || 2)));
 
   return (
     <div className="overview-daily-spark">
@@ -41,6 +41,7 @@ export default function ExportDailySpark({ daily, seekMs = 0, timing = null }) {
                 {stack.segments.map((segment, segmentIndex) => {
                   const isBottom = segmentIndex === 0;
                   const isTop = segmentIndex === stack.segments.length - 1;
+                  const showDecoration = barWidth >= 3 && segment.heightPx >= 3;
                   return (
                     <span
                       key={segment.key}
@@ -49,8 +50,8 @@ export default function ExportDailySpark({ daily, seekMs = 0, timing = null }) {
                         bottom: `${segment.bottomPct}%`,
                         height: `${segment.heightPct}%`,
                         background: segment.color,
-                        borderRadius: resolveSegmentRadius(isTop, isBottom),
-                        boxShadow: isBottom ? undefined : '0 -1px 0 rgba(6, 8, 15, 0.55)',
+                        borderRadius: showDecoration ? resolveSegmentRadius(isTop, isBottom) : 0,
+                        boxShadow: showDecoration && !isBottom ? '0 -1px 0 rgba(6, 8, 15, 0.45)' : undefined,
                       }}
                     />
                   );
@@ -81,6 +82,7 @@ function buildExportStacks(frame) {
         color: getModelColor(series.key),
         bottomPct: (bottom / yMax) * 100,
         heightPct: (value / yMax) * 100,
+        heightPx: (value / yMax) * 104,
       });
       bottom += value;
     }
@@ -94,4 +96,8 @@ function resolveSegmentRadius(isTop, isBottom) {
   if (isTop) return '2px 2px 0 0';
   if (isBottom) return '0 0 2px 2px';
   return 0;
+}
+
+function snapHalf(value) {
+  return Math.round(value * 2) / 2;
 }
