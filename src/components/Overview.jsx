@@ -1058,7 +1058,7 @@ export function OverviewFrame({
     : undefined;
 
   return (
-    <div className="animate-in">
+    <div className={`animate-in${exportPlayback ? ' export-overview-frame' : ''}`}>
       <div className="stat-row">
         <div className="stat-cards">
           <div className="stat-card">

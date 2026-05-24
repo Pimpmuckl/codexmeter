@@ -4,7 +4,7 @@
   "description": "Local telemetry dashboard for Codex CLI usage",
   "type": "module",
   "bin": {
-    "codexmeter": "./bin/codexmeter.js"
+    "codexmeter": "bin/codexmeter.js"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

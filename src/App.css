@@ -232,6 +232,36 @@ body {
 }
 .stat-per-day .stat-per-day-value { font-weight: 600; color: var(--text-secondary); }
 
+.export-overview-frame .stat-row {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.export-overview-frame .overview-daily-spark {
+  order: -1;
+  flex: 0 0 126px;
+  width: 100%;
+  min-width: 100%;
+  min-height: 126px;
+}
+.export-overview-frame .stat-cards {
+  width: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.export-overview-frame .stat-card {
+  padding: 0.95rem 1.1rem;
+}
+.export-overview-frame .heatmap-wrap {
+  margin-bottom: 1.25rem;
+}
+.export-overview-frame .grid-3 {
+  margin-bottom: 1rem;
+}
+.export-overview-frame .chart-card {
+  margin-bottom: 0;
+}
+
 /* ─── Time Range Toggle ─── */
 .range-toggle {
   display: inline-flex;
