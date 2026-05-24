@@ -892,6 +892,8 @@ export function OverviewFrame({
   const orderedModels = [...chartTopModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
   const chartInteractive = !exportMode && !exportPlayback && !isIngestActive;
+  const donutRadius = resolveDonutRadius(exportSeekMs, exportPlayback);
+  const donutSeriesAnimation = !exportMode && !exportPlayback && ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION;
   const exportBarsUpdateDuration = exportPlayback
     ? resolveExportChartUpdateDuration(
       exportSeekMs,
@@ -902,17 +904,6 @@ export function OverviewFrame({
         : null
     )
     : 0;
-  const exportDonutsUpdateDuration = exportPlayback
-    ? resolveExportChartUpdateDuration(
-      exportSeekMs,
-      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartIntroUpdateDurationMs,
-      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs,
-      exportPhase === 'tail' || exportPhase === 'final_hold'
-        ? OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartTailUpdateDurationMs
-        : null
-    )
-    : 0;
-
   const repoOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_BARS,
@@ -986,13 +977,7 @@ export function OverviewFrame({
   const familyOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
-    ...(exportMode ? { animation: false } : {}),
-    ...(exportPlayback ? {
-      animation: true,
-      animationDuration: 0,
-      animationDurationUpdate: exportDonutsUpdateDuration,
-      animationEasingUpdate: 'cubicOut',
-    } : {}),
+    ...(exportMode || exportPlayback ? { animation: false } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -1002,9 +987,9 @@ export function OverviewFrame({
     series: [{
       id: 'overview-work-type',
       type: 'pie',
-      animation: exportMode ? false : (exportPlayback ? true : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION),
+      animation: donutSeriesAnimation,
       avoidLabelOverlap: !familySingleLabelLayout,
-      radius: ['48%', '72%'],
+      radius: donutRadius,
       center: ['50%', '50%'],
       label: {
         show: !hideSingleFamilyLabel,
@@ -1030,13 +1015,7 @@ export function OverviewFrame({
   const modelOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_DONUTS,
-    ...(exportMode ? { animation: false } : {}),
-    ...(exportPlayback ? {
-      animation: true,
-      animationDuration: 0,
-      animationDurationUpdate: exportDonutsUpdateDuration,
-      animationEasingUpdate: 'cubicOut',
-    } : {}),
+    ...(exportMode || exportPlayback ? { animation: false } : {}),
     tooltip: {
       trigger: 'item',
       appendToBody: true,
@@ -1046,9 +1025,9 @@ export function OverviewFrame({
     series: [{
       id: 'overview-models',
       type: 'pie',
-      animation: exportMode ? false : (exportPlayback ? true : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION),
+      animation: donutSeriesAnimation,
       avoidLabelOverlap: !modelSingleLabelLayout,
-      radius: ['48%', '72%'],
+      radius: donutRadius,
       center: ['50%', '50%'],
       label: {
         show: !hideSingleModelLabel,
@@ -1288,6 +1267,16 @@ function resolveExportChartUpdateDuration(seekMs, introDurationMs, steadyDuratio
   const intro = Math.max(steady, Math.round(introDurationMs ?? steady));
   const blend = resolveExportChartIntroBlend(seekMs);
   return Math.round(intro + ((steady - intro) * blend));
+}
+
+function resolveDonutRadius(seekMs, exportPlayback = false) {
+  if (!exportPlayback) return ['48%', '72%'];
+  const scale = 0.9 + (resolveExportChartIntroBlend(seekMs) * 0.1);
+  return [`${roundPercent(48 * scale)}%`, `${roundPercent(72 * scale)}%`];
+}
+
+function roundPercent(value) {
+  return Math.round(value * 100) / 100;
 }
 
 function resolveExportChartIntroBlend(seekMs) {
