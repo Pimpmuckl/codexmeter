@@ -464,6 +464,21 @@ body {
   inset: 0;
   overflow: hidden;
 }
+.overview-daily-spark-bars {
+  position: absolute;
+  inset: 4px;
+}
+.overview-daily-spark-bar {
+  position: absolute;
+  bottom: 0;
+  height: 100%;
+  transform: translateX(-50%);
+}
+.overview-daily-spark-segment {
+  position: absolute;
+  left: 0;
+  width: 100%;
+}
 .overview-daily-spark-empty {
   display: flex;
   align-items: center;

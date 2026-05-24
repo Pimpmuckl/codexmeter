@@ -1,19 +1,6 @@
 import React, { useMemo } from 'react';
-import ReactEChartsCore from '../utils/echartsReact';
-import * as echarts from 'echarts/core';
-import { BarChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
 import { getModelColor } from '../utils/colors';
-import { formatCompactNumber } from '../utils/formatters';
-import { ECHARTS_OVERVIEW_DAILY } from '../utils/animationsDefault';
 import { buildExportDailySparkFrame } from '../utils/exportDailySparkTimeline';
-
-echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
-
-function fmt(n) {
-  return formatCompactNumber(n);
-}
 
 export default function ExportDailySpark({ daily, seekMs = 0, timing = null }) {
   const frame = useMemo(
@@ -34,78 +21,77 @@ export default function ExportDailySpark({ daily, seekMs = 0, timing = null }) {
     );
   }
 
-  const dateAtIndex = (index) => frame.dates[
-    Math.max(0, Math.min(frame.dates.length - 1, Math.round(index)))
-  ];
-  const option = {
-    backgroundColor: 'transparent',
-    ...ECHARTS_OVERVIEW_DAILY,
-    animation: false,
-    animationDuration: 0,
-    animationDurationUpdate: 0,
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      appendToBody: true,
-      confine: true,
-      formatter: (params) => {
-        if (!params?.length) return '';
-        const axisIndex = Array.isArray(params[0].data) ? params[0].data[0] : params[0].dataIndex;
-        let html = `<b>${dateAtIndex(axisIndex)}</b><br/>`;
-        let total = 0;
-        const sorted = [...params]
-          .filter((p) => (Array.isArray(p.value) ? p.value[1] : p.value) > 0)
-          .sort((a, b) => ((Array.isArray(b.value) ? b.value[1] : b.value) || 0) - ((Array.isArray(a.value) ? a.value[1] : a.value) || 0));
-        for (const p of sorted) {
-          const value = Array.isArray(p.value) ? p.value[1] : p.value;
-          html += `${p.marker} ${p.seriesName}: ${fmt(value)}<br/>`;
-          total += value;
-        }
-        html += `<b>Total: ${fmt(total)}</b>`;
-        return html;
-      },
-    },
-    grid: { left: 4, right: 4, top: 4, bottom: 4 },
-    xAxis: {
-      type: 'value',
-      min: frame.xMin,
-      max: frame.xMax,
-      show: false,
-    },
-    yAxis: {
-      type: 'value',
-      show: false,
-      scale: false,
-      min: 0,
-      max: frame.yMax,
-    },
-    series: frame.series.map((series) => ({
-      id: `overview-export-daily-${series.key}`,
-      name: series.label,
-      type: 'bar',
-      stack: 'total',
-      data: series.data,
-      itemStyle: { color: getModelColor(series.key) },
-      barWidth: frame.barWidth,
-      barMaxWidth: frame.barMaxWidth,
-      barMinHeight: 0,
-    })),
-  };
+  const stacks = buildExportStacks(frame);
+  const xSpan = Math.max(1, frame.xMax - frame.xMin);
+  const barWidth = Math.max(1, Math.min(frame.barMaxWidth || frame.barWidth || 1, frame.barWidth || 1));
 
   return (
     <div className="overview-daily-spark">
       <span className="overview-daily-spark-title">Daily Usage</span>
       <div className="overview-daily-spark-chart">
-        <ReactEChartsCore
-          echarts={echarts}
-          option={option}
-          style={{ width: '100%', height: '100%' }}
-          theme="dark"
-          lazyUpdate={false}
-          notMerge={true}
-          replaceMerge={['series']}
-        />
+        <div className="overview-daily-spark-bars" aria-hidden="true">
+          {stacks.map((stack) => {
+            const centerPct = ((stack.index - frame.xMin) / xSpan) * 100;
+            return (
+              <div
+                key={stack.date}
+                className="overview-daily-spark-bar"
+                style={{ left: `${centerPct}%`, width: `${barWidth}px` }}
+              >
+                {stack.segments.map((segment, segmentIndex) => {
+                  const isBottom = segmentIndex === 0;
+                  const isTop = segmentIndex === stack.segments.length - 1;
+                  return (
+                    <span
+                      key={segment.key}
+                      className="overview-daily-spark-segment"
+                      style={{
+                        bottom: `${segment.bottomPct}%`,
+                        height: `${segment.heightPct}%`,
+                        background: segment.color,
+                        borderRadius: resolveSegmentRadius(isTop, isBottom),
+                        boxShadow: isBottom ? undefined : '0 -1px 0 rgba(6, 8, 15, 0.55)',
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
+}
+
+function buildExportStacks(frame) {
+  const yMax = Math.max(1, Number(frame?.yMax) || 1);
+  return (frame?.dates || []).map((date, dateIndex) => {
+    const firstPoint = frame.series?.[0]?.data?.[dateIndex];
+    const index = Array.isArray(firstPoint) ? firstPoint[0] : dateIndex;
+    let bottom = 0;
+    const segments = [];
+
+    for (const series of frame.series || []) {
+      const point = series.data?.[dateIndex];
+      const value = Math.max(0, Number(Array.isArray(point) ? point[1] : point) || 0);
+      if (value <= 0) continue;
+      segments.push({
+        key: series.key,
+        color: getModelColor(series.key),
+        bottomPct: (bottom / yMax) * 100,
+        heightPct: (value / yMax) * 100,
+      });
+      bottom += value;
+    }
+
+    return { date, index, segments };
+  });
+}
+
+function resolveSegmentRadius(isTop, isBottom) {
+  if (isTop && isBottom) return '2px';
+  if (isTop) return '2px 2px 0 0';
+  if (isBottom) return '0 0 2px 2px';
+  return 0;
 }

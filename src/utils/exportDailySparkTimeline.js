@@ -121,7 +121,7 @@ function buildDayDurations(dayCount, motionDurationMs) {
 }
 
 function revealFactorForIndex(index, progress) {
-  return easeOutCubic(clamp01(progress - index));
+  return easeOutSoft(clamp01(progress - index));
 }
 
 function computeStackMax(daily, startIndex, endIndex) {
@@ -158,9 +158,9 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
-function easeOutCubic(t) {
+function easeOutSoft(t) {
   const x = clamp01(t);
-  return 1 - Math.pow(1 - x, 3);
+  return 1 - Math.pow(1 - x, 2.35);
 }
 
 function easeInOutCubic(t) {

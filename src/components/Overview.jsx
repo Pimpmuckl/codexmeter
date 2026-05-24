@@ -892,15 +892,36 @@ export function OverviewFrame({
   const orderedModels = [...chartTopModels.slice(0, 6)].sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
   const chartInteractive = !exportMode && !exportPlayback && !isIngestActive;
+  const exportBarsUpdateDuration = exportPlayback
+    ? resolveExportChartUpdateDuration(
+      exportSeekMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartIntroUpdateDurationMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartUpdateDurationMs,
+      exportPhase === 'tail' || exportPhase === 'final_hold'
+        ? OVERVIEW_INGEST_ANIMATION.videoExport?.barsChartTailUpdateDurationMs
+        : null
+    )
+    : 0;
+  const exportDonutsUpdateDuration = exportPlayback
+    ? resolveExportChartUpdateDuration(
+      exportSeekMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartIntroUpdateDurationMs,
+      OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartUpdateDurationMs,
+      exportPhase === 'tail' || exportPhase === 'final_hold'
+        ? OVERVIEW_INGEST_ANIMATION.videoExport?.donutsChartTailUpdateDurationMs
+        : null
+    )
+    : 0;
 
   const repoOption = {
     backgroundColor: 'transparent',
     ...ECHARTS_OVERVIEW_BARS,
     ...(exportMode ? { animation: false } : {}),
     ...(exportPlayback ? {
-      animation: false,
+      animation: true,
       animationDuration: 0,
-      animationDurationUpdate: 0,
+      animationDurationUpdate: exportBarsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
     } : {}),
     tooltip: {
       trigger: 'axis',
@@ -923,6 +944,7 @@ export function OverviewFrame({
       axisLine: { show: false },
     },
     series: [{
+      id: 'overview-top-repos',
       type: 'bar',
       data: reversedRepos.map((row) => {
         const val = row.tokens || 0;
@@ -966,9 +988,10 @@ export function OverviewFrame({
     ...ECHARTS_OVERVIEW_DONUTS,
     ...(exportMode ? { animation: false } : {}),
     ...(exportPlayback ? {
-      animation: false,
+      animation: true,
       animationDuration: 0,
-      animationDurationUpdate: 0,
+      animationDurationUpdate: exportDonutsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
     } : {}),
     tooltip: {
       trigger: 'item',
@@ -977,8 +1000,9 @@ export function OverviewFrame({
       formatter: p => `${p.name}: ${fmt(p.value)} tokens (${p.percent}%)`,
     },
     series: [{
+      id: 'overview-work-type',
       type: 'pie',
-      animation: exportMode || exportPlayback ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode ? false : (exportPlayback ? true : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION),
       avoidLabelOverlap: !familySingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
@@ -1008,9 +1032,10 @@ export function OverviewFrame({
     ...ECHARTS_OVERVIEW_DONUTS,
     ...(exportMode ? { animation: false } : {}),
     ...(exportPlayback ? {
-      animation: false,
+      animation: true,
       animationDuration: 0,
-      animationDurationUpdate: 0,
+      animationDurationUpdate: exportDonutsUpdateDuration,
+      animationEasingUpdate: 'cubicOut',
     } : {}),
     tooltip: {
       trigger: 'item',
@@ -1019,8 +1044,9 @@ export function OverviewFrame({
       formatter: p => `${p.name}: ${fmt(p.value)} tokens (${p.percent}%)`,
     },
     series: [{
+      id: 'overview-models',
       type: 'pie',
-      animation: exportMode || exportPlayback ? false : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION,
+      animation: exportMode ? false : (exportPlayback ? true : ECHARTS_OVERVIEW_DONUT_SERIES_ANIMATION),
       avoidLabelOverlap: !modelSingleLabelLayout,
       radius: ['48%', '72%'],
       center: ['50%', '50%'],
@@ -1117,7 +1143,7 @@ export function OverviewFrame({
               style={{ height: 180, cursor: repoChartEvents ? 'pointer' : undefined }}
               theme="dark"
               lazyUpdate={false}
-              notMerge={exportMode || exportPlayback}
+              notMerge={exportMode}
               onEvents={repoChartEvents}
             />
           ) : (
@@ -1127,7 +1153,7 @@ export function OverviewFrame({
         <div className="chart-card overview-donut-card">
           <div className="chart-title" style={{ marginBottom: '0.5rem' }}>Work Type</div>
           {topFamilies.length > 0 ? (
-            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode || exportPlayback} />
+            <ReactEChartsCore echarts={echarts} option={familyOption} style={{ height: 180 }} theme="dark" lazyUpdate={false} notMerge={exportMode} />
           ) : (
             <div style={{ color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>No data</div>
           )}
@@ -1141,7 +1167,7 @@ export function OverviewFrame({
               style={{ height: 180, cursor: modelChartEvents ? 'pointer' : undefined }}
               theme="dark"
               lazyUpdate={false}
-              notMerge={exportMode || exportPlayback}
+              notMerge={exportMode}
               onEvents={modelChartEvents}
             />
           ) : (
@@ -1253,6 +1279,15 @@ export default memo(Overview, areOverviewPropsEqual);
 
 function resolveExportChartIntroProgress(seekMs) {
   return resolveExportChartIntroBlend(seekMs);
+}
+
+function resolveExportChartUpdateDuration(seekMs, introDurationMs, steadyDurationMs, tailDurationMs = null) {
+  if (tailDurationMs != null) return Math.max(0, Math.round(tailDurationMs));
+
+  const steady = Math.max(0, Math.round(steadyDurationMs ?? 0));
+  const intro = Math.max(steady, Math.round(introDurationMs ?? steady));
+  const blend = resolveExportChartIntroBlend(seekMs);
+  return Math.round(intro + ((steady - intro) * blend));
 }
 
 function resolveExportChartIntroBlend(seekMs) {
