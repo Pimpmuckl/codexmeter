@@ -1,6 +1,6 @@
 {
   "name": "codexmeter",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "description": "Local telemetry dashboard for Codex CLI usage",
   "type": "module",
   "bin": {
