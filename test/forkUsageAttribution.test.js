@@ -283,6 +283,115 @@ test('reasoning-only token events still establish the first usage timestamp', as
   }
 });
 
+test('rollout active seconds split across timezone midnight', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'codexmeter-rollout-'));
+  const rolloutPath = path.join(dir, 'rollout.jsonl');
+  try {
+    await writeFile(rolloutPath, [
+      JSON.stringify({
+        timestamp: '2026-04-10T21:59:50.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-5.4', effort: 'medium' },
+      }),
+      JSON.stringify({
+        timestamp: '2026-04-10T22:00:10.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-5.4', effort: 'medium' },
+      }),
+      '',
+    ].join('\n'));
+
+    const data = await enrichFromRollout(rolloutPath, { timezone: 'Europe/Berlin' });
+
+    assert.deepEqual(data.active_by_day, {
+      '2026-04-10': 10,
+      '2026-04-11': 10,
+    });
+    assert.equal(data.active_seconds, 20);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('rg rollout scan falls back when timestamp coverage is partial', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'codexmeter-rollout-'));
+  const rolloutPath = path.join(dir, 'rollout.jsonl');
+  try {
+    await writeFile(rolloutPath, [
+      JSON.stringify({
+        timestamp: '2026-04-10T21:59:50.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-5.4', effort: 'medium' },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 40,
+              cached_input_tokens: 10,
+              output_tokens: 4,
+              reasoning_output_tokens: 0,
+              total_tokens: 44,
+            },
+          },
+        },
+        timestamp: '2026-04-10T22:00:10.000Z',
+      }),
+      '',
+    ].join('\n'));
+
+    const data = await enrichFromRollout(rolloutPath, {
+      timezone: 'Europe/Berlin',
+      fastScan: true,
+      rgScan: true,
+      rgMinBytes: 0,
+    });
+
+    assert.equal(data.first_timestamp, Date.parse('2026-04-10T21:59:50.000Z'));
+    assert.equal(data.last_timestamp, Date.parse('2026-04-10T22:00:10.000Z'));
+    assert.equal(data.active_seconds, 20);
+    assert.equal(data.first_usage_timestamp, Date.parse('2026-04-10T22:00:10.000Z'));
+    assert.deepEqual(data.usage_by_day, {
+      '2026-04-11': { input_tokens: 40, cached_input_tokens: 10, output_tokens: 4 },
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('fast rollout scan still counts timestamped irrelevant lines', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'codexmeter-rollout-'));
+  const rolloutPath = path.join(dir, 'rollout.jsonl');
+  try {
+    await writeFile(rolloutPath, [
+      JSON.stringify({
+        timestamp: '2026-04-10T21:59:50.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-5.4', effort: 'medium' },
+      }),
+      JSON.stringify({
+        timestamp: '2026-04-10T22:00:10.000Z',
+        type: 'event_msg',
+        payload: { type: 'agent_reasoning_delta' },
+      }),
+      '',
+    ].join('\n'));
+
+    const data = await enrichFromRollout(rolloutPath, {
+      timezone: 'Europe/Berlin',
+      fastScan: true,
+    });
+
+    assert.equal(data.first_timestamp, Date.parse('2026-04-10T21:59:50.000Z'));
+    assert.equal(data.last_timestamp, Date.parse('2026-04-10T22:00:10.000Z'));
+    assert.equal(data.active_seconds, 20);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('usage timeline preserves resets while timestamp lookup resolves the correct segment', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'codexmeter-rollout-'));
   const rolloutPath = path.join(dir, 'rollout.jsonl');

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAggregates } from '../server/aggregator.js';
 import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap } from '../server/live-state.js';
+import { splitIntervalByDay } from '../server/day-key.js';
 
 function makeSession() {
   return {
@@ -53,6 +54,57 @@ test('live daily bootstrap includes elapsed seconds for model and family breakdo
   assert.equal(day.by_model['gpt-5.4'].elapsed_seconds, 3600);
   assert.equal(day.by_family.review.elapsed_seconds, 3600);
   assert.equal(day.by_repo.demo.elapsed_seconds, 3600);
+});
+
+test('timezone intervals split at the requested local midnight', () => {
+  const parts = splitIntervalByDay(
+    Date.parse('2026-04-10T21:59:50Z'),
+    Date.parse('2026-04-10T22:00:10Z'),
+    'Europe/Berlin'
+  );
+
+  assert.deepEqual(parts, [
+    { dayKey: '2026-04-10', overlapMs: 10_000 },
+    { dayKey: '2026-04-11', overlapMs: 10_000 },
+  ]);
+});
+
+test('settled and live daily buckets split sessions across timezone midnight', () => {
+  const session = {
+    ...makeSession(),
+    started_at: Date.parse('2026-04-10T21:59:50Z') / 1000,
+    ended_at: Date.parse('2026-04-10T22:00:10Z') / 1000,
+    elapsed_seconds: null,
+    active_by_day: null,
+    tokens_used: 200,
+    cost: 2,
+    has_usage_by_day: false,
+    usage_by_day: null,
+  };
+
+  const aggregates = buildAggregates([session], 'Europe/Berlin');
+  const settledByDay = new Map(aggregates.daily.map((entry) => [entry.date, entry]));
+  assert.equal(settledByDay.get('2026-04-10')?.tokens, 100);
+  assert.equal(settledByDay.get('2026-04-11')?.tokens, 100);
+  assert.equal(settledByDay.get('2026-04-10')?.sessions, 1);
+  assert.equal(settledByDay.get('2026-04-11')?.sessions, 1);
+  assert.equal(aggregates.heatmap['2026-04-10']?.tokens, 100);
+  assert.equal(aggregates.heatmap['2026-04-11']?.tokens, 100);
+  assert.equal(aggregates.heatmap['2026-04-10']?.sessions, 1);
+  assert.equal(aggregates.heatmap['2026-04-11']?.sessions, 1);
+
+  const live = createLiveAggregateState('Europe/Berlin');
+  const patch = createEmptyLivePatch();
+  applySessionToLiveState(live, session, patch);
+  const bootstrap = buildLiveBootstrap(live);
+  assert.equal(bootstrap.daily['2026-04-10']?.tokens, 100);
+  assert.equal(bootstrap.daily['2026-04-11']?.tokens, 100);
+  assert.equal(bootstrap.daily['2026-04-10']?.sessions, 1);
+  assert.equal(bootstrap.daily['2026-04-11']?.sessions, 1);
+  assert.equal(bootstrap.heatmap['2026-04-10']?.tokens, 100);
+  assert.equal(bootstrap.heatmap['2026-04-11']?.tokens, 100);
+  assert.equal(bootstrap.heatmap['2026-04-10']?.sessions, 1);
+  assert.equal(bootstrap.heatmap['2026-04-11']?.sessions, 1);
 });
 
 test('daily elapsed breakdowns use raw session metadata for mixed roots', () => {

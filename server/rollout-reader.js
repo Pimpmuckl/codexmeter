@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { spawn } from 'child_process';
-import { createDayKeyFormatter } from './day-key.js';
+import { createDayKeyFormatter, splitIntervalByDay } from './day-key.js';
 
 const ACTIVE_GAP_CAP_MS = 15 * 60 * 1000;
 const LINE_HEADER_SCAN_CHARS = 512;
@@ -13,6 +13,7 @@ const RG_RELEVANT_PATTERN =
   '"type"\\s*:\\s*"token_count"';
 const RG_TOKEN_COUNT_PATTERN = '"type"\\s*:\\s*"token_count"';
 const RG_TIMESTAMP_PATTERN = '^\\{[^{}]*"timestamp"\\s*:\\s*"[^"]+"';
+const RG_ANY_TIMESTAMP_PATTERN = '"timestamp"\\s*:\\s*"[^"]+"';
 
 export async function enrichFromRollout(rolloutPath, opts = {}) {
   if (!rolloutPath || !existsSync(rolloutPath)) {
@@ -21,7 +22,7 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
 
   const tz = opts.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const toDayKey = opts.toDayKey || createDayKeyFormatter(tz);
-  const fastScan = opts.fastScan === true;
+  let fastScan = opts.fastScan === true;
   const rgScan = opts.rgScan === true;
   const rgMinBytes = Math.max(0, Number(opts.rgMinBytes ?? DEFAULT_RG_MIN_BYTES) || 0);
   const result = {
@@ -44,10 +45,12 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
     let activeFromRgTimestamps = false;
     if (rgScan && shouldUseRipgrep(rolloutPath, rgMinBytes)) {
       const rgResult = await readRolloutLinesWithRipgrep(rolloutPath);
-      if (rgResult) {
+      if (rgResult?.timestampMatches?.length && rgResult.timestampsComplete) {
         lines = rgResult.relevantLines;
-        applyTimestampMatches(result, rgResult.timestampMatches, toDayKey);
+        applyTimestampMatches(result, rgResult.timestampMatches, tz);
         activeFromRgTimestamps = true;
+      } else if (rgResult) {
+        fastScan = false;
       }
     }
     if (!lines) {
@@ -74,33 +77,32 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
 
         if (fastScan || activeFromRgTimestamps) {
           ts = extractTimestampMs(line);
-          if (ts !== null && !activeFromRgTimestamps) {
+          const countedHeaderTimestamp = ts !== null && !activeFromRgTimestamps;
+          if (countedHeaderTimestamp) {
             updateTimestampBounds(result, ts);
             if (prevTimestamp !== null && ts >= prevTimestamp) {
-              const deltaMs = Math.min(ts - prevTimestamp, ACTIVE_GAP_CAP_MS);
-              activeMs += deltaMs;
-              if (deltaMs > 0) {
-                const dayKey = toDayKey(prevTimestamp);
-                activeByDay.set(dayKey, (activeByDay.get(dayKey) || 0) + deltaMs);
-              }
+              activeMs += addActiveInterval(activeByDay, prevTimestamp, ts, tz);
             }
             prevTimestamp = ts;
           }
           if (!activeFromRgTimestamps && !isRolloutLineWorthParsing(line)) continue;
           obj = JSON.parse(line);
+          if (ts === null && obj.timestamp) ts = parseTimestampMs(obj.timestamp);
+          if (ts !== null && !activeFromRgTimestamps && !countedHeaderTimestamp) {
+            updateTimestampBounds(result, ts);
+            if (prevTimestamp !== null && ts >= prevTimestamp) {
+              activeMs += addActiveInterval(activeByDay, prevTimestamp, ts, tz);
+            }
+            prevTimestamp = ts;
+          }
         } else {
           obj = JSON.parse(line);
           if (obj.timestamp) {
-            ts = new Date(obj.timestamp).getTime();
-            if (!isNaN(ts)) {
+            ts = parseTimestampMs(obj.timestamp);
+            if (ts !== null) {
               updateTimestampBounds(result, ts);
               if (prevTimestamp !== null && ts >= prevTimestamp) {
-                const deltaMs = Math.min(ts - prevTimestamp, ACTIVE_GAP_CAP_MS);
-                activeMs += deltaMs;
-                if (deltaMs > 0) {
-                  const dayKey = toDayKey(prevTimestamp);
-                  activeByDay.set(dayKey, (activeByDay.get(dayKey) || 0) + deltaMs);
-                }
+                activeMs += addActiveInterval(activeByDay, prevTimestamp, ts, tz);
               }
               prevTimestamp = ts;
             }
@@ -299,12 +301,17 @@ function shouldUseRipgrep(rolloutPath, minBytes) {
 }
 
 async function readRolloutLinesWithRipgrep(rolloutPath) {
-  const [relevantLines, timestampMatches] = await Promise.all([
+  const [relevantLines, timestampMatches, timestampMentions] = await Promise.all([
     readMatchingLinesWithRipgrep(RG_RELEVANT_PATTERN, rolloutPath),
     readMatchingLinesWithRipgrep(RG_TIMESTAMP_PATTERN, rolloutPath, ['--only-matching']),
+    readMatchingLinesWithRipgrep(RG_ANY_TIMESTAMP_PATTERN, rolloutPath, ['--only-matching']),
   ]);
-  if (!relevantLines || !timestampMatches) return null;
-  return { relevantLines, timestampMatches };
+  if (!relevantLines || !timestampMatches || !timestampMentions) return null;
+  return {
+    relevantLines,
+    timestampMatches,
+    timestampsComplete: timestampMatches.length === timestampMentions.length,
+  };
 }
 
 function readMatchingLinesWithRipgrep(pattern, rolloutPath, extraArgs = []) {
@@ -336,7 +343,7 @@ function readMatchingLinesWithRipgrep(pattern, rolloutPath, extraArgs = []) {
   });
 }
 
-function applyTimestampMatches(result, timestampMatches, toDayKey) {
+function applyTimestampMatches(result, timestampMatches, tz) {
   let prevTimestamp = null;
   let activeMs = 0;
   const activeByDay = new Map();
@@ -346,12 +353,7 @@ function applyTimestampMatches(result, timestampMatches, toDayKey) {
     if (ts === null) continue;
     updateTimestampBounds(result, ts);
     if (prevTimestamp !== null && ts >= prevTimestamp) {
-      const deltaMs = Math.min(ts - prevTimestamp, ACTIVE_GAP_CAP_MS);
-      activeMs += deltaMs;
-      if (deltaMs > 0) {
-        const dayKey = toDayKey(prevTimestamp);
-        activeByDay.set(dayKey, (activeByDay.get(dayKey) || 0) + deltaMs);
-      }
+      activeMs += addActiveInterval(activeByDay, prevTimestamp, ts, tz);
     }
     prevTimestamp = ts;
   }
@@ -363,6 +365,15 @@ function applyTimestampMatches(result, timestampMatches, toDayKey) {
     result.active_by_day = activeByDaySeconds;
     result.active_seconds = Object.values(activeByDaySeconds).reduce((sum, seconds) => sum + seconds, 0);
   }
+}
+
+function addActiveInterval(activeByDay, startMs, endMs, tz) {
+  const cappedEndMs = Math.min(endMs, startMs + ACTIVE_GAP_CAP_MS);
+  if (cappedEndMs <= startMs) return 0;
+  for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, cappedEndMs, tz)) {
+    activeByDay.set(dayKey, (activeByDay.get(dayKey) || 0) + overlapMs);
+  }
+  return cappedEndMs - startMs;
 }
 
 function updateTimestampBounds(result, ts) {
@@ -380,7 +391,11 @@ function extractTimestampMs(line) {
     : line;
   const match = TIMESTAMP_RE.exec(head);
   if (!match) return null;
-  const ts = Date.parse(match[1]);
+  return parseTimestampMs(match[1]);
+}
+
+function parseTimestampMs(value) {
+  const ts = Date.parse(value);
   return Number.isNaN(ts) ? null : ts;
 }
 
