@@ -21,6 +21,18 @@ function parseNumberEnv(name, defaultValue = undefined) {
   return Number.isFinite(value) && value > 0 ? value : defaultValue;
 }
 
+function parseIsoDateOption(name, value) {
+  if (!value) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    program.error(`${name} must be a valid date in YYYY-MM-DD format`);
+  }
+  const ms = Date.parse(`${value}T00:00:00Z`);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== value) {
+    program.error(`${name} must be a valid date in YYYY-MM-DD format`);
+  }
+  return value;
+}
+
 program
   .name('codexmeter')
   .description('Local telemetry dashboard for Codex CLI usage')
@@ -34,6 +46,11 @@ program
   .parse();
 
 const opts = program.opts();
+const from = parseIsoDateOption('--from', opts.from);
+const to = parseIsoDateOption('--to', opts.to);
+if (from && to && from > to) {
+  program.error('--from must be earlier than or equal to --to');
+}
 
 const ingestToggles = {
   ingestTiming: parseBooleanEnv('CODEXMETER_INGEST_TIMING'),
@@ -59,8 +76,8 @@ if (activeIngestToggles.length) {
 }
 
 const app = createServer(opts.codexHome, {
-  from: opts.from,
-  to: opts.to,
+  from,
+  to,
   repo: opts.repo,
   agentFamily: opts.agentFamily,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

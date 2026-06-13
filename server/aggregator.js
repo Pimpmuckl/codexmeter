@@ -1,5 +1,5 @@
 import { CACHE_ASSUMPTIONS } from './cost-catalog.js';
-import { createDayKeyFormatter } from './day-key.js';
+import { createDayKeyFormatter, splitIntervalByDay } from './day-key.js';
 
 function normalizeEffortKey(effort) {
   if (!effort) return 'unknown';
@@ -231,7 +231,6 @@ function buildFamilies(sessions) {
 }
 
 function buildDaily(rawSessions, groupedSessions, tz) {
-  const toDayKeyInTz = createDayKeyFormatter(tz);
   const dayMap = new Map();
   for (const s of rawSessions) {
     if (!s.started_at || !s.ended_at) continue;
@@ -241,23 +240,12 @@ function buildDaily(rawSessions, groupedSessions, tz) {
     const totalDur = endMs - startMs;
     if (totalDur <= 0) continue;
 
-    const startDay = toDayKeyInTz(startMs);
-    const endDay = toDayKeyInTz(endMs - 1);
-
     if (s.has_usage_by_day) {
-      addSessionPresence(dayMap, startDay, endDay, startMs, endMs, totalDur, toDayKeyInTz, s);
+      addSessionPresence(dayMap, startMs, endMs, totalDur, tz, s);
       addUsageByDay(dayMap, s);
-    } else if (startDay === endDay) {
-      addToDay(dayMap, startDay, s, 1.0);
     } else {
-      let cursor = dayStartMs(startDay);
-      while (cursor < endMs) {
-        const nextDay = cursor + 86400000;
-        const overlapStart = Math.max(cursor, startMs);
-        const overlapEnd = Math.min(nextDay, endMs);
-        const fraction = (overlapEnd - overlapStart) / totalDur;
-        if (fraction > 0) addToDay(dayMap, toDayKeyInTz(cursor), s, fraction);
-        cursor = nextDay;
+      for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
+        addToDay(dayMap, dayKey, s, overlapMs / totalDur);
       }
     }
   }
@@ -320,6 +308,9 @@ function buildHeatmap(rawSessions, groupedSessions, tz) {
   const dayMap = new Map();
   for (const s of rawSessions) {
     if (!s.started_at) continue;
+    const startMs = s.started_at * 1000;
+    const endMs = (s.ended_at || s.started_at) * 1000;
+    const totalDur = endMs - startMs;
     if (s.has_usage_by_day) {
       for (const usageDay of s.usage_by_day || []) {
         const dayKey = usageDay.day;
@@ -328,16 +319,13 @@ function buildHeatmap(rawSessions, groupedSessions, tz) {
         d.tokens += usageDay.tokens || 0;
         if (usageDay.cost !== null) d.cost += usageDay.cost;
       }
-      const startDay = toDayKeyInTz(s.started_at * 1000);
-      if (!dayMap.has(startDay)) dayMap.set(startDay, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
-      dayMap.get(startDay).sessions++;
+      addHeatmapPresence(dayMap, s, startMs, endMs, totalDur, tz, toDayKeyInTz);
+    } else if (totalDur > 0) {
+      for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
+        addHeatmapUsage(dayMap, dayKey, s, overlapMs / totalDur);
+      }
     } else {
-      const dk = toDayKeyInTz(s.started_at * 1000);
-      if (!dayMap.has(dk)) dayMap.set(dk, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
-      const d = dayMap.get(dk);
-      d.tokens += s.tokens_used;
-      if (s.cost !== null) d.cost += s.cost;
-      d.sessions++;
+      addHeatmapUsage(dayMap, toDayKeyInTz(startMs), s, 1);
     }
   }
 
@@ -351,20 +339,30 @@ function buildHeatmap(rawSessions, groupedSessions, tz) {
   return Object.fromEntries(dayMap);
 }
 
-function addSessionPresence(dayMap, startDay, endDay, startMs, endMs, totalDur, toDayKeyInTz, session) {
-  if (startDay === endDay) {
-    addPresenceToDay(dayMap, startDay, session, 1.0);
+function addHeatmapUsage(dayMap, dayKey, session, fraction) {
+  if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
+  const d = dayMap.get(dayKey);
+  d.tokens += session.tokens_used * fraction;
+  if (session.cost !== null) d.cost += session.cost * fraction;
+  if (fraction > 0.001) d.sessions++;
+}
+
+function addHeatmapPresence(dayMap, session, startMs, endMs, totalDur, tz, toDayKeyInTz) {
+  if (totalDur <= 0) {
+    const dayKey = toDayKeyInTz(startMs);
+    if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
+    dayMap.get(dayKey).sessions++;
     return;
   }
+  for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
+    if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed: 0, sessions: 0 });
+    if ((overlapMs / totalDur) > 0.001) dayMap.get(dayKey).sessions++;
+  }
+}
 
-  let cursor = dayStartMs(startDay);
-  while (cursor < endMs) {
-    const nextDay = cursor + 86400000;
-    const overlapStart = Math.max(cursor, startMs);
-    const overlapEnd = Math.min(nextDay, endMs);
-    const fraction = (overlapEnd - overlapStart) / totalDur;
-    if (fraction > 0) addPresenceToDay(dayMap, toDayKeyInTz(cursor), session, fraction);
-    cursor = nextDay;
+function addSessionPresence(dayMap, startMs, endMs, totalDur, tz, session) {
+  for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
+    addPresenceToDay(dayMap, dayKey, session, overlapMs / totalDur);
   }
 }
 
@@ -424,11 +422,6 @@ function addElapsedToDay(dayMap, dayKey, session, seconds) {
   const rKey = session.repo_label || 'unknown';
   if (!d.by_repo[rKey]) d.by_repo[rKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
   d.by_repo[rKey].elapsed_seconds += seconds;
-}
-
-function dayStartMs(dayKey) {
-  const [y, m, d] = dayKey.split('-').map(Number);
-  return new Date(y, m - 1, d).getTime();
 }
 
 function overlapsLowerBound(session, lowerBound) {
