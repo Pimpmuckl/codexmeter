@@ -55,6 +55,7 @@ task_plan.md
 
 # Tools
 .playwright-cli
+output/playwright/
 
 # Tarblobs
 *.tgz

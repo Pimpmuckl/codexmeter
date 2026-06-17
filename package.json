@@ -24,6 +24,7 @@
     "pretest": "npm run build",
     "test": "node --test \"test/*.test.js\" \"test/**/*.test.js\"",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
+    "browser:smoke": "node scripts/browser-smoke.mjs",
     "start": "node bin/codexmeter.js",
     "preview": "npm run build && node bin/codexmeter.js",
     "prepublishOnly": "npm run build"
@@ -45,6 +46,7 @@
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
     "nodemon": "^3.1.14",
+    "playwright": "^1.61.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "vite": "^8.0.16"
