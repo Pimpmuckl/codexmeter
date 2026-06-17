@@ -32,6 +32,11 @@ test('dashboard tabs render and basic interactions survive in a real browser', a
       pageErrors.push(err.message);
     });
     await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(async () => {
+      const response = await fetch('/api/progress');
+      const progress = await response.json();
+      return progress.complete === true;
+    }, null, { timeout: 45000 });
 
     await page.getByText('Top Repos', { exact: true }).waitFor();
     await page.getByText('Work Type', { exact: true }).waitFor();
@@ -56,6 +61,7 @@ test('dashboard tabs render and basic interactions survive in a real browser', a
     await page.getByRole('cell', { name: /nextide-web|nextide-api|codexmeter/ }).first().click();
     await page.getByText('Models in repo', { exact: true }).waitFor();
 
+    await page.locator('.range-toggle').getByRole('button', { name: 'All' }).click();
     await page.getByRole('button', { name: 'Models' }).click();
     await page.locator('tbody tr').first().click();
     await page.getByText('Sessions by effort', { exact: true }).waitFor();

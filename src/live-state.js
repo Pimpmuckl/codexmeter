@@ -82,6 +82,22 @@ export function buildLiveDataEnvelope(liveState) {
   };
 }
 
+export function shouldUseLiveData(liveData, { overviewIngestActive = false, settledOverviewReady = false } = {}) {
+  return Boolean(liveData && (overviewIngestActive || !settledOverviewReady));
+}
+
+export function hasLiveRows(envelope) {
+  const data = envelope?.data;
+  if (Array.isArray(data)) return data.length > 0;
+  if (!data || typeof data !== 'object') return false;
+  return ['total', 'd7', 'd30'].some((rangeKey) => Array.isArray(data[rangeKey]) && data[rangeKey].length > 0);
+}
+
+export function chooseLiveEnvelope(liveEnvelope, settledEnvelope, useLiveData) {
+  if (!useLiveData) return settledEnvelope;
+  return hasLiveRows(liveEnvelope) ? liveEnvelope : (settledEnvelope || liveEnvelope);
+}
+
 export function buildLiveStateFromSettled(data, ingestId, seq = 0) {
   const next = createEmptyLiveClientState();
   next.ingest_id = ingestId || null;

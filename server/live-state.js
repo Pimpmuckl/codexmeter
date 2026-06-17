@@ -1,6 +1,16 @@
 import { CACHE_ASSUMPTIONS } from './cost-catalog.js';
 import { createDayKeyFormatter, splitIntervalByDay } from './day-key.js';
 
+function normalizeEffortKey(effort) {
+  if (!effort) return 'unknown';
+  const k = String(effort).toLowerCase().trim().replace(/-/g, '');
+  if (k === 'low') return 'low';
+  if (k === 'medium') return 'medium';
+  if (k === 'high') return 'high';
+  if (k === 'xhigh') return 'xhigh';
+  return k || 'unknown';
+}
+
 export function createLiveAggregateState(tz) {
   const now = Date.now() / 1000;
   return {
@@ -166,6 +176,8 @@ function applyRepoBucket(repoMap, topKeys, session, dirtySet) {
       exact_priced: 0,
       heuristic_priced: 0,
       sessions: 0,
+      by_model: {},
+      by_family: {},
     });
   }
   const repo = repoMap.get(key);
@@ -177,6 +189,8 @@ function applyRepoBucket(repoMap, topKeys, session, dirtySet) {
     if (session.cost_source === 'exact') repo.exact_priced += 1;
     if (session.cost_source === 'heuristic') repo.heuristic_priced += 1;
   }
+  addBreakdown(repo.by_model, session.model_name || 'unknown', session);
+  addBreakdown(repo.by_family, session.agent_family || 'generic', session);
 
   updateTopKeys(repoMap, topKeys, key);
   dirtySet.add(key);
@@ -185,7 +199,7 @@ function applyRepoBucket(repoMap, topKeys, session, dirtySet) {
 function applyModelBucket(modelMap, topKeys, session, dirtySet) {
   const key = session.model_name || 'unknown';
   if (!modelMap.has(key)) {
-    modelMap.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0 });
+    modelMap.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0, by_effort: {} });
   }
   const model = modelMap.get(key);
   model.tokens += session.tokens_used || 0;
@@ -196,9 +210,22 @@ function applyModelBucket(modelMap, topKeys, session, dirtySet) {
     if (session.cost_source === 'exact') model.exact_priced += 1;
     if (session.cost_source === 'heuristic') model.heuristic_priced += 1;
   }
+  addBreakdown(model.by_effort, normalizeEffortKey(session.reasoning_effort), session);
 
   updateTopKeys(modelMap, topKeys, key);
   dirtySet.add(key);
+}
+
+function addBreakdown(target, key, session) {
+  if (!target[key]) target[key] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
+  const bucket = target[key];
+  bucket.tokens += session.tokens_used || 0;
+  bucket.sessions += 1;
+  if (session.cost !== null) {
+    bucket.cost += session.cost;
+    if (session.cost_source === 'exact') bucket.exact_priced += 1;
+    if (session.cost_source === 'heuristic') bucket.heuristic_priced += 1;
+  }
 }
 
 function applyFamilyBucket(familyMap, topKeys, session, dirtySet) {
@@ -549,6 +576,8 @@ function serializeRepoSummary(value) {
     exact_priced: value.exact_priced,
     heuristic_priced: value.heuristic_priced,
     sessions: value.sessions,
+    by_model: deepRoundClone(value.by_model || {}, ['tokens', 'cost', 'sessions', 'exact_priced', 'heuristic_priced']),
+    by_family: deepRoundClone(value.by_family || {}, ['tokens', 'cost', 'sessions', 'exact_priced', 'heuristic_priced']),
   };
 }
 
@@ -561,6 +590,7 @@ function serializeModelSummary(value) {
     exact_priced: value.exact_priced,
     heuristic_priced: value.heuristic_priced,
     sessions: value.sessions,
+    by_effort: deepRoundClone(value.by_effort || {}, ['tokens', 'cost', 'sessions', 'exact_priced', 'heuristic_priced']),
   };
 }
 

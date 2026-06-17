@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildOverviewPresentationTarget } from '../src/utils/overviewPresentation.js';
+import {
+  buildOverviewPresentationTarget,
+  resolveDailyRevealStartIndex,
+  resolveDailyRevealTargetIndex,
+} from '../src/utils/overviewPresentation.js';
 
 test('overview d7 stats use the visible daily rows instead of the broader overlap bucket', () => {
   const presentation = buildOverviewPresentationTarget({
@@ -81,4 +85,17 @@ test('overview total stats still use the overview aggregate bucket', () => {
   assert.equal(presentation.stats.elapsed, 456);
   assert.equal(presentation.stats.cost, 7.5);
   assert.equal(presentation.stats.days, 3);
+});
+
+test('ingest daily reveal starts at the first parsed day', () => {
+  const dates = [
+    '2026-01-01',
+    '2026-01-02',
+    '2026-01-03',
+    '2026-01-04',
+  ];
+
+  assert.equal(resolveDailyRevealStartIndex(dates, true), 0);
+  assert.equal(resolveDailyRevealTargetIndex(dates, true, 0.08), 3);
+  assert.equal(resolveDailyRevealStartIndex(dates, false), 3);
 });

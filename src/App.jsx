@@ -6,7 +6,7 @@ import Models from './components/Models';
 import DailyUsage from './components/DailyUsage';
 import Sessions from './components/Sessions';
 import OverviewVideoExport from './components/OverviewVideoExport';
-import { buildLiveDataEnvelope, buildLiveStateFromSettled, mergeLiveEvent } from './live-state';
+import { buildLiveDataEnvelope, buildLiveStateFromSettled, chooseLiveEnvelope, mergeLiveEvent, shouldUseLiveData } from './live-state';
 import { debugLive, summarizeLivePayload, summarizeLiveState } from './utils/liveDebug';
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
@@ -519,13 +519,16 @@ export default function App() {
     liveState ? buildLiveDataEnvelope(liveState) : null
   ), [liveState]);
   const settledOverviewReady = dataReady;
-  const useLiveData = Boolean(liveData && !settledOverviewReady);
+  const useLiveData = shouldUseLiveData(liveData, { overviewIngestActive, settledOverviewReady });
   const overviewData = useLiveData ? liveData.overview : (data.overview || liveData?.overview);
   const overviewHeatmap = useLiveData ? liveData.heatmap : (data.heatmap || liveData?.heatmap);
-  const overviewDaily = useLiveData ? liveData.daily : (data.daily || liveData?.daily);
-  const overviewFamilies = useLiveData ? liveData.families : (data.families || liveData?.families);
-  const overviewRepos = useLiveData ? liveData.repos : (data.repos || liveData?.repos);
-  const overviewModels = useLiveData ? liveData.models : (data.models || liveData?.models);
+  const overviewDaily = chooseLiveEnvelope(liveData?.daily, data.daily || liveData?.daily, useLiveData);
+  const overviewFamilies = chooseLiveEnvelope(liveData?.families, data.families || liveData?.families, useLiveData);
+  const overviewRepos = chooseLiveEnvelope(liveData?.repos, data.repos || liveData?.repos, useLiveData);
+  const overviewModels = chooseLiveEnvelope(liveData?.models, data.models || liveData?.models, useLiveData);
+  const tabRepos = chooseLiveEnvelope(liveData?.repos, data.repos, useLiveData);
+  const tabModels = chooseLiveEnvelope(liveData?.models, data.models, useLiveData);
+  const tabDaily = chooseLiveEnvelope(liveData?.daily, data.daily, useLiveData);
 
   const ov = overviewData?.data;
   const d = ov?.[range] || ov?.total || {};
@@ -744,7 +747,7 @@ export default function App() {
           )}
           {tab === 'Repos' && (
             <Repos
-              data={data.repos}
+              data={tabRepos}
               range={range}
               focusRequest={reposFocusRequest}
               onFocusRequestConsumed={() => setReposFocusRequest(null)}
@@ -752,7 +755,7 @@ export default function App() {
           )}
           {tab === 'Models' && (
             <Models
-              data={data.models}
+              data={tabModels}
               range={range}
               focusRequest={modelsFocusRequest}
               onFocusRequestConsumed={() => setModelsFocusRequest(null)}
@@ -760,7 +763,7 @@ export default function App() {
           )}
           {tab === 'Daily' && (
             <DailyUsage
-              data={data.daily}
+              data={tabDaily}
               range={range}
               navigateToDayRequest={dailyNavigateRequest}
               onNavigateToDayConsumed={() => setDailyNavigateRequest(null)}

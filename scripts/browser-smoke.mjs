@@ -17,7 +17,11 @@ try {
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const pageErrors = [];
+  const consoleErrors = [];
   page.on('pageerror', (err) => pageErrors.push(err.message));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
 
   const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   if (!response || response.status() >= 400) {
@@ -25,11 +29,15 @@ try {
   }
 
   await page.locator('body').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.locator('.app-content-revealed').waitFor({ state: 'visible', timeout: 120_000 });
   await page.waitForTimeout(500);
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   if (pageErrors.length) {
     throw new Error(`Page errors: ${pageErrors.join(' | ')}`);
+  }
+  if (consoleErrors.length) {
+    throw new Error(`Console errors: ${consoleErrors.join(' | ')}`);
   }
 
   console.log(`Browser smoke OK: ${url}`);

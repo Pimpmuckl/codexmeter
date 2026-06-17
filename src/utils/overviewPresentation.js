@@ -8,6 +8,29 @@ function clampNumber(value) {
   return Number.isFinite(value) ? value : 0;
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+export function resolveDailyRevealStartIndex(dates, isIngestActive) {
+  if (!dates?.length) return 0;
+  if (!isIngestActive) return dates.length - 1;
+  return 0;
+}
+
+export function resolveDailyRevealTargetIndex(dates, isIngestActive, ingestProgress = 0) {
+  if (!dates?.length) return 0;
+  if (!isIngestActive) return dates.length - 1;
+
+  const startIndex = resolveDailyRevealStartIndex(dates, isIngestActive);
+  const lastIndex = dates.length - 1;
+  const normalizedProgress = clamp01(((ingestProgress || 0) - 0.08) / 0.92);
+  const easedProgress = Math.pow(normalizedProgress, 0.82);
+  const progressTarget = startIndex + (lastIndex - startIndex) * easedProgress;
+  const elasticLookaheadDays = 32;
+  return Math.max(startIndex, Math.min(lastIndex, Math.floor(progressTarget + elasticLookaheadDays)));
+}
+
 function pickRangeData(data, range) {
   if (Array.isArray(data?.data)) return data.data;
   if (Array.isArray(data)) return data;

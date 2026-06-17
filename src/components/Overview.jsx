@@ -17,7 +17,13 @@ import {
 } from '../utils/animationsDefault';
 import { useAnimatedOverviewPresentation } from '../hooks/useAnimatedOverviewPresentation';
 import { useDailyStackPresentationTween } from '../hooks/useDailyStackPresentationTween';
-import { buildDailyCursorPresentationTarget, buildOverviewPresentationTarget, getZoomSlice } from '../utils/overviewPresentation';
+import {
+  buildDailyCursorPresentationTarget,
+  buildOverviewPresentationTarget,
+  getZoomSlice,
+  resolveDailyRevealStartIndex,
+  resolveDailyRevealTargetIndex,
+} from '../utils/overviewPresentation';
 import { debugLive, summarizeDailyData, summarizeHeatmapData } from '../utils/liveDebug';
 import { buildDailyStackPresentation } from '../utils/dailyStack';
 
@@ -70,29 +76,6 @@ function getOverviewDailyBarSizing(count) {
 function buildFullDailySparkPresentation(daily) {
   const { dates, series } = buildDailyStackPresentation(daily, { split: 'model', metric: 'tokens' });
   return { dates, series };
-}
-
-function clamp01(value) {
-  return Math.max(0, Math.min(1, value));
-}
-
-function resolveDailyRevealTargetIndex(dates, isIngestActive, ingestProgress = 0) {
-  if (!dates?.length) return 0;
-  if (!isIngestActive) return dates.length - 1;
-
-  const startIndex = resolveDailyRevealStartIndex(dates, isIngestActive);
-  const lastIndex = dates.length - 1;
-  const normalizedProgress = clamp01(((ingestProgress || 0) - 0.08) / 0.92);
-  const easedProgress = Math.pow(normalizedProgress, 0.82);
-  const progressTarget = startIndex + (lastIndex - startIndex) * easedProgress;
-  const elasticLookaheadDays = 32;
-  return Math.max(startIndex, Math.min(lastIndex, Math.floor(progressTarget + elasticLookaheadDays)));
-}
-
-function resolveDailyRevealStartIndex(dates, isIngestActive) {
-  if (!dates?.length) return 0;
-  if (!isIngestActive) return dates.length - 1;
-  return Math.min(dates.length - 1, 6);
 }
 
 function resolveEffectiveDailyTargetIndex(rawTargetIndex, cursor, datesLength, isIngestActive) {
@@ -449,6 +432,30 @@ function DailySpark({
     );
   }
 
+  return (
+    <ReadyDailySpark
+      sourceDaily={sourceDaily}
+      elasticDaily={elasticDaily}
+      range={range}
+      isIngestActive={isIngestActive}
+      currentDateBucket={currentDateBucket}
+      exportMode={exportMode}
+      exportPlayback={exportPlayback}
+      onDayClick={onDayClick}
+    />
+  );
+}
+
+function ReadyDailySpark({
+  sourceDaily,
+  elasticDaily = null,
+  range = 'total',
+  isIngestActive = false,
+  currentDateBucket = null,
+  exportMode = false,
+  exportPlayback = false,
+  onDayClick,
+}) {
   const resolvedElasticDaily = elasticDaily || {
     daily: sourceDaily,
     cursor: sourceDaily.dates.length - 1,
@@ -786,7 +793,12 @@ function Heatmap({
   );
 }
 
-export function OverviewFrame({
+export function OverviewFrame(props) {
+  if (!props.presentation?.ready) return null;
+  return <ReadyOverviewFrame {...props} />;
+}
+
+function ReadyOverviewFrame({
   presentation,
   rawPresentation = null,
   fullDaily = null,
@@ -807,7 +819,6 @@ export function OverviewFrame({
   onNavigateToRepo,
   onNavigateToModel,
 }) {
-  if (!presentation?.ready) return null;
   const exportChartIntroProgress = exportPlayback
     ? resolveExportChartIntroProgress(exportSeekMs)
     : 1;

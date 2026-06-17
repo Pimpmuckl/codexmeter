@@ -729,9 +729,7 @@ export default function DailyUsage({
   const [displayMode, setDisplayMode] = useState('absolute');
   const [selectedDate, setSelectedDate] = useState(null);
 
-  if (!data?.data?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
-
-  const daily = useMemo(() => getDailyRows(data), [data]);
+  const daily = useMemo(() => data?.data?.length ? getDailyRows(data) : [], [data]);
 
   useEffect(() => {
     if (!selectedDate && daily[0]) setSelectedDate(daily[daily.length - 1]?.date || daily[0]?.date);
@@ -742,6 +740,8 @@ export default function DailyUsage({
   }, []);
 
   const selectedDay = daily.find((d) => d.date === selectedDate) || null;
+
+  if (!daily.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
 
   return (
     <div className="animate-in">

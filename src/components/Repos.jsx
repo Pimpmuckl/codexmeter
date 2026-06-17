@@ -151,8 +151,6 @@ export default function Repos({
     onFocusRequestConsumed?.();
   }, [focusRequest, reposData, onFocusRequestConsumed]);
 
-  if (!reposData?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
-
   const top = filtered.slice(0, 15);
   const reversed = [...top].reverse();
   const maxTokens = Math.max(...top.map((repo) => repo.tokens || 0), 0);
@@ -207,6 +205,8 @@ export default function Repos({
       }
     },
   }), [top]);
+
+  if (!reposData?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
 
   return (
     <div className="animate-in">

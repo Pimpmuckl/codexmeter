@@ -181,7 +181,6 @@ export default function Models({
     onFocusRequestConsumed?.();
   }, [focusRequest, models, onFocusRequestConsumed]);
 
-  if (!models?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
   const reversed = [...models].reverse();
   const maxTokens = Math.max(...models.map((model) => model.tokens || 0), 0);
   const chartHeight = Math.max(180, models.length * 34);
@@ -230,6 +229,8 @@ export default function Models({
     },
   }), [models]);
 
+  if (!models?.length) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>No data</div>;
+
   return (
     <div className="animate-in">
       <div className="section-header">
@@ -266,7 +267,7 @@ export default function Models({
                   <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(m.tokens)}</td>
                   <td style={{ fontFamily: 'var(--font-mono)' }}>{fmtCost(m.cost)}</td>
                   <td>{m.sessions}</td>
-                  <td>{Object.keys(m.by_effort).length}</td>
+                  <td>{Object.keys(m.by_effort || {}).length}</td>
                 </tr>
                 {expanded === m.model_name && (
                   <tr><td colSpan={5} style={{ background: 'var(--bg-surface)', padding: '0.75rem 1rem' }}>
