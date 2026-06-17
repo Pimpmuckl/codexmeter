@@ -410,7 +410,19 @@ export function createPartialAggregateSessions(sessions, toDayKey) {
     .filter(isSafeForPartialAggregation)
     .map((session) => {
       const clone = { ...session };
+      const isUnparsedRollout = clone.rollout_path && !clone.materialized;
+      if (isUnparsedRollout) {
+        clone.model_name = null;
+        clone.cost = null;
+        clone.cost_source = 'unavailable';
+        clone.has_usage_by_day = true;
+        clone.usage_by_day = [];
+      }
       finalizeSessionMetrics(clone, toDayKey);
+      if (isUnparsedRollout) {
+        clone.cost = null;
+        clone.cost_source = 'unavailable';
+      }
       return clone;
     });
 }

@@ -213,7 +213,7 @@ test('partial aggregates skip unmaterialized fork children without mutating cano
     rollout_path: 'parent.jsonl',
     elapsed_seconds: null,
     active_by_day: null,
-    model_name: null,
+    model_name: 'gpt-5.5',
     usage_total: null,
     usage_by_day: null,
     has_usage_by_day: false,
@@ -242,9 +242,18 @@ test('partial aggregates skip unmaterialized fork children without mutating cano
   assert.equal(isSafeForPartialAggregation(parent), true);
   assert.equal(isSafeForPartialAggregation(child), false);
   assert.deepEqual(partial.map((session) => session.thread_id), ['parent']);
+  assert.equal(partial[0].model_name, null);
   assert.equal(partial[0].elapsed_seconds, 504);
+  assert.equal(partial[0].cost, null);
+  assert.deepEqual(partial[0].usage_by_day, []);
   assert.equal(parent.elapsed_seconds, null);
   assert.equal(parent.cost, null);
+
+  const aggregates = buildAggregates(partial, 'Europe/Berlin', null, {
+    includeUnknownModels: false,
+  });
+  assert.deepEqual(aggregates.models.total, []);
+  assert.equal(aggregates.daily.reduce((sum, day) => sum + day.tokens, 0), 0);
 });
 
 test('usage lookup works even when timeline entries are not pre-sorted', () => {
