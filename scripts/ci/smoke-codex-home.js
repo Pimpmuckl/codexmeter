@@ -1,12 +1,12 @@
 import fs from 'fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
-import Database from 'better-sqlite3';
 
 export async function createSmokeCodexHome(targetDir) {
   await fs.mkdir(targetDir, { recursive: true });
 
   const dbPath = path.join(targetDir, 'state_5.sqlite');
-  const db = new Database(dbPath);
+  const db = new DatabaseSync(dbPath);
 
   try {
     db.exec(`

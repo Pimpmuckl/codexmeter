@@ -10,7 +10,7 @@ Thanks for helping improve CodexMeter. This document describes how we work and w
 
 ## Development setup
 
-1. **Node.js** — Use **22.12+** (`package.json` `engines`).
+1. **Node.js** — Use **22.13+** (`package.json` `engines`).
 2. **Install and verify**
    ```bash
    npm install

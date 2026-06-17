@@ -1,8 +1,6 @@
-import { createRequire } from 'module';
+import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'fs';
 import path from 'path';
-
-const require = createRequire(import.meta.url);
 
 export function readThreads(codexHome, onProgress) {
   const dbPath = path.join(codexHome, 'state_5.sqlite');
@@ -10,8 +8,7 @@ export function readThreads(codexHome, onProgress) {
     throw new Error(`SQLite database not found at ${dbPath}`);
   }
 
-  const Database = require('better-sqlite3');
-  const db = new Database(dbPath, { readonly: true });
+  const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
     const count = db.prepare('SELECT count(*) as c FROM threads').get().c;

@@ -42,7 +42,7 @@ Data is read from `state_5.sqlite`, `logs_1.sqlite`, and rollout JSONL under `.c
 
 ## Requirements
 
-- Node.js 22.12+
+- Node.js 22.13+
 - A `.codex` directory (from Codex CLI usage)
 - Chrome, Chromium, or Edge for video export, or let CodexMeter download a single-use portable browser from the UI
 

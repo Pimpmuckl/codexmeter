@@ -1,13 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import os from 'os';
 import path from 'path';
-import { createRequire } from 'module';
 import { createIngestState, runIngest } from '../server/ingest.js';
-
-const require = createRequire(import.meta.url);
-const Database = require('better-sqlite3');
 
 async function createCodexHomeWithMissingRolloutThread() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codexmeter-ingest-fallback-'));
@@ -15,7 +12,7 @@ async function createCodexHomeWithMissingRolloutThread() {
   await fs.mkdir(codexHome, { recursive: true });
 
   const dbPath = path.join(codexHome, 'state_5.sqlite');
-  const db = new Database(dbPath);
+  const db = new DatabaseSync(dbPath);
   db.exec(`
     CREATE TABLE threads (
       id TEXT PRIMARY KEY,
