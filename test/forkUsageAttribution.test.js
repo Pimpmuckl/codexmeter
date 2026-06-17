@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { buildAggregates } from '../server/aggregator.js';
-import { applyForkUsageCorrection, getForkLineageParentThreadId, selectForkParentUsageEntry } from '../server/ingest.js';
+import {
+  applyForkUsageCorrection,
+  createPartialAggregateSessions,
+  getForkLineageParentThreadId,
+  isSafeForPartialAggregation,
+  selectForkParentUsageEntry,
+} from '../server/ingest.js';
 import { enrichFromRollout, findUsageAtOrBefore, readUsageTimeline } from '../server/rollout-reader.js';
 
 function makeForkedSession(overrides = {}) {
@@ -180,13 +186,65 @@ test('daily bucket subtraction preserves valid cached/input ratios across multip
   });
 });
 
-test('fork lineage correction only follows explicit fork metadata', () => {
+test('fork lineage correction follows spawn-edge parent metadata', () => {
   const session = makeForkedSession({
     forked_from_id: null,
-    parent_thread_id: 'ordinary-subagent-parent',
+    parent_thread_id: 'spawn-edge-parent',
   });
 
-  assert.equal(getForkLineageParentThreadId(session), null);
+  assert.equal(getForkLineageParentThreadId(session), 'spawn-edge-parent');
+});
+
+test('explicit fork metadata wins over spawn-edge parent metadata', () => {
+  const session = makeForkedSession({
+    forked_from_id: 'explicit-fork-parent',
+    parent_thread_id: 'spawn-edge-parent',
+  });
+
+  assert.equal(getForkLineageParentThreadId(session), 'explicit-fork-parent');
+});
+
+test('partial aggregates skip unmaterialized fork children without mutating canonical sessions', () => {
+  const toDayKey = () => '2026-03-15';
+  const parent = makeForkedSession({
+    thread_id: 'parent',
+    forked_from_id: null,
+    parent_thread_id: null,
+    rollout_path: 'parent.jsonl',
+    elapsed_seconds: null,
+    active_by_day: null,
+    model_name: null,
+    usage_total: null,
+    usage_by_day: null,
+    has_usage_by_day: false,
+    cost: null,
+    cost_source: 'unavailable',
+    materialized: false,
+  });
+  const child = makeForkedSession({
+    thread_id: 'child',
+    forked_from_id: null,
+    parent_thread_id: 'parent',
+    rollout_path: 'child.jsonl',
+    elapsed_seconds: null,
+    active_by_day: null,
+    model_name: null,
+    usage_total: null,
+    usage_by_day: null,
+    has_usage_by_day: false,
+    cost: null,
+    cost_source: 'unavailable',
+    materialized: false,
+  });
+
+  const partial = createPartialAggregateSessions([parent, child], toDayKey);
+
+  assert.equal(isSafeForPartialAggregation(parent), true);
+  assert.equal(isSafeForPartialAggregation(child), false);
+  assert.deepEqual(partial.map((session) => session.thread_id), ['parent']);
+  assert.equal(partial[0].elapsed_seconds, 504);
+  assert.equal(parent.elapsed_seconds, null);
+  assert.equal(parent.cost, null);
 });
 
 test('usage lookup works even when timeline entries are not pre-sorted', () => {

@@ -14,14 +14,24 @@ export function readThreads(codexHome, onProgress) {
     const count = db.prepare('SELECT count(*) as c FROM threads').get().c;
     if (onProgress) onProgress({ total: count, read: 0 });
 
+    const hasThreadSpawnEdges = db.prepare(
+      'SELECT count(*) as c FROM sqlite_master WHERE type = ? AND name = ?'
+    ).get('table', 'thread_spawn_edges').c > 0;
+    const parentSelect = hasThreadSpawnEdges ? 'e.parent_thread_id' : 'NULL';
+    const parentJoin = hasThreadSpawnEdges
+      ? 'LEFT JOIN thread_spawn_edges e ON e.child_thread_id = t.id'
+      : '';
+
     const stmt = db.prepare(`
       SELECT
-        id, rollout_path, created_at, updated_at,
-        source, model_provider, model, reasoning_effort, cwd, title,
-        tokens_used, agent_nickname, agent_role,
-        cli_version, git_branch, git_origin_url
-      FROM threads
-      ORDER BY created_at ASC
+        t.id, t.rollout_path, t.created_at, t.updated_at,
+        t.source, t.model_provider, t.model, t.reasoning_effort, t.cwd, t.title,
+        t.tokens_used, t.agent_nickname, t.agent_role,
+        t.cli_version, t.git_branch, t.git_origin_url,
+        ${parentSelect} AS parent_thread_id
+      FROM threads t
+      ${parentJoin}
+      ORDER BY t.created_at ASC
     `);
 
     const threads = [];
@@ -41,6 +51,7 @@ export function readThreads(codexHome, onProgress) {
         tokens_used: row.tokens_used || 0,
         agent_nickname: row.agent_nickname || null,
         agent_role: row.agent_role || null,
+        parent_thread_id: row.parent_thread_id || null,
         cli_version: row.cli_version || '',
         git_branch: row.git_branch || null,
       });

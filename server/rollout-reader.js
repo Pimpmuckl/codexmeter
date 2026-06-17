@@ -14,6 +14,7 @@ const RG_RELEVANT_PATTERN =
 const RG_TOKEN_COUNT_PATTERN = '"type"\\s*:\\s*"token_count"';
 const RG_TIMESTAMP_PATTERN = '^\\{[^{}]*"timestamp"\\s*:\\s*"[^"]+"';
 const RG_ANY_TIMESTAMP_PATTERN = '"timestamp"\\s*:\\s*"[^"]+"';
+const SORTED_BY_TIMESTAMP = Symbol('codexmeter.sortedByTimestamp');
 
 export async function enrichFromRollout(rolloutPath, opts = {}) {
   if (!rolloutPath || !existsSync(rolloutPath)) {
@@ -266,6 +267,7 @@ export async function readUsageTimeline(rolloutPath, opts = {}) {
       }
     }
     timeline.sort((left, right) => left.timestamp - right.timestamp);
+    markTimelineSorted(timeline);
     return timeline;
   } catch {
     return [];
@@ -273,23 +275,53 @@ export async function readUsageTimeline(rolloutPath, opts = {}) {
 }
 
 export function findUsageEntryAtOrBefore(timeline, timestampMs) {
-  if (!Array.isArray(timeline) || !timeline.length || !timestampMs) return null;
-  const orderedTimeline = timeline.every((entry, index) => index === 0 || timeline[index - 1].timestamp <= entry.timestamp)
-    ? timeline
-    : [...timeline].sort((left, right) => left.timestamp - right.timestamp);
+  if (!Array.isArray(timeline) || !timeline.length || timestampMs == null) return null;
+  const target = Number(timestampMs);
+  if (!Number.isFinite(target)) return null;
+
+  const orderedTimeline = getTimestampOrderedTimeline(timeline);
+  let left = 0;
+  let right = orderedTimeline.length - 1;
   let best = null;
-  for (const entry of orderedTimeline) {
-    if ((entry?.timestamp || 0) <= timestampMs) {
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const entry = orderedTimeline[mid];
+    if ((entry?.timestamp || 0) <= target) {
       best = entry;
-      continue;
+      left = mid + 1;
+    } else {
+      right = mid - 1;
     }
-    break;
   }
-  return best || null;
+
+  return best;
 }
 
 export function findUsageAtOrBefore(timeline, timestampMs) {
   return findUsageEntryAtOrBefore(timeline, timestampMs)?.usage || null;
+}
+
+function getTimestampOrderedTimeline(timeline) {
+  if (timeline[SORTED_BY_TIMESTAMP]) return timeline;
+  if (isTimestampSorted(timeline)) {
+    markTimelineSorted(timeline);
+    return timeline;
+  }
+  const orderedTimeline = [...timeline].sort((left, right) => left.timestamp - right.timestamp);
+  markTimelineSorted(orderedTimeline);
+  return orderedTimeline;
+}
+
+function isTimestampSorted(timeline) {
+  return timeline.every((entry, index) => index === 0 || timeline[index - 1].timestamp <= entry.timestamp);
+}
+
+function markTimelineSorted(timeline) {
+  Object.defineProperty(timeline, SORTED_BY_TIMESTAMP, {
+    value: true,
+    configurable: true,
+  });
 }
 
 function shouldUseRipgrep(rolloutPath, minBytes) {

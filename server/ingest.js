@@ -132,7 +132,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         agent_nickname: t.agent_nickname,
         agent_family: classifyAgentFamily(agentRole),
         is_subagent: isSubagent(agentRole),
-        parent_thread_id: null,
+        parent_thread_id: t.parent_thread_id || null,
         forked_from_id: null,
         cost: null,
         cost_source: 'unavailable',
@@ -141,6 +141,9 @@ export async function runIngest(codexHome, state, opts = {}) {
         cli_version: t.cli_version,
       });
     }
+
+    const sessionById = new Map(sessions.map((session) => [session.thread_id, session]));
+    inheritMissingLineageModels(sessions, sessionById);
 
     state.phase = 'enrichment';
     queueLiveProgress(state);
@@ -226,6 +229,7 @@ export async function runIngest(codexHome, state, opts = {}) {
         }
       }
 
+      inheritMissingLineageModels(batch, sessionById);
       await applyForkUsageCorrections(batch, resolveForkUsageSnapshot, FORK_CORRECTION_CONCURRENCY);
       for (const s of batch) {
         if (s._usage_by_day_raw) {
@@ -301,6 +305,7 @@ export async function runIngest(codexHome, state, opts = {}) {
       }
     }
 
+    inheritMissingLineageModels(sessions, sessionById);
     for (const s of sessions) {
       finalizeSessionMetrics(s, toDayKey);
     }
@@ -378,24 +383,41 @@ export function restartIngest(codexHome, state, opts = {}) {
 }
 
 function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
-  const source = mode.partial ? sessions.filter(session => session.materialized) : sessions;
+  const source = mode.partial ? sessions.filter(isSafeForPartialAggregation) : sessions;
   const visibleSource = filterVisibleSessions(source);
   const filtered = applyFilters(visibleSource, opts);
   const sessionView = buildSessionView(filtered, source);
   state.sessions = sessionView;
-  state.aggregates = buildAggregates(filtered, tz, sessionView);
+  state.aggregates = buildAggregates(filtered, tz, sessionView, {
+    includeUnknownModels: mode.includeUnknownModels !== false,
+  });
   state.generated_at = new Date().toISOString();
 }
 
 function publishPartialAggregates(sessions, state, opts, tz, toDayKey) {
-  for (const session of sessions) {
-    finalizeSessionMetrics(session, toDayKey);
-  }
-  assignRootThreadIds(sessions, toDayKey);
-  rebuildAggregates(sessions, state, opts, tz);
+  const partialSessions = createPartialAggregateSessions(sessions, toDayKey);
+  rebuildAggregates(partialSessions, state, opts, tz, {
+    includeUnknownModels: false,
+  });
   state.partial_ready = true;
   state.percent = Math.max(state.percent, 0.081);
   queueLiveProgress(state);
+}
+
+export function createPartialAggregateSessions(sessions, toDayKey) {
+  assignRootThreadIds(sessions, toDayKey);
+  return sessions
+    .filter(isSafeForPartialAggregation)
+    .map((session) => {
+      const clone = { ...session };
+      finalizeSessionMetrics(clone, toDayKey);
+      return clone;
+    });
+}
+
+export function isSafeForPartialAggregation(session) {
+  if (!session?.rollout_path || session.materialized) return true;
+  return !getForkLineageParentThreadId(session);
 }
 
 export function filterVisibleSessions(sessions) {
@@ -427,6 +449,33 @@ export function selectEnrichmentCandidates(sessions, opts = {}) {
     }
   }
   return [...warmup, ...recent, ...older];
+}
+
+export function inheritMissingLineageModels(targets, sessionById = new Map(targets.map((session) => [session.thread_id, session]))) {
+  const memo = new Map();
+  const resolving = new Set();
+
+  const resolveModel = (session) => {
+    if (!session) return null;
+    if (session.model_name) return session.model_name;
+    if (memo.has(session.thread_id)) return memo.get(session.thread_id);
+    if (resolving.has(session.thread_id)) return null;
+
+    resolving.add(session.thread_id);
+    const parent = sessionById.get(getForkLineageParentThreadId(session));
+    const modelName = resolveModel(parent);
+    if (modelName && !session.model_name) {
+      session.model_name = modelName;
+    }
+    resolving.delete(session.thread_id);
+
+    memo.set(session.thread_id, session.model_name || null);
+    return memo.get(session.thread_id);
+  };
+
+  for (const session of targets) {
+    resolveModel(session);
+  }
 }
 
 export function pickVisibleDateBucket(bufferedSessions, liveReadySessions) {
@@ -636,7 +685,7 @@ async function applyForkUsageCorrections(sessions, resolveForkUsageSnapshot, con
 }
 
 export function getForkLineageParentThreadId(session) {
-  return session?.forked_from_id || null;
+  return session?.forked_from_id || session?.parent_thread_id || null;
 }
 
 export function applyForkUsageCorrection(session, inheritedUsage) {

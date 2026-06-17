@@ -11,7 +11,16 @@ function normalizeEffortKey(effort) {
   return k || 'unknown';
 }
 
-export function buildAggregates(sessions, tz, sessionView = null) {
+function modelKeyFor(session, opts = {}) {
+  const key = session.model_name || 'unknown';
+  if (key === 'unknown' && opts.includeUnknownModels === false) return null;
+  return key;
+}
+
+export function buildAggregates(sessions, tz, sessionView = null, opts = {}) {
+  const aggregateOpts = {
+    includeUnknownModels: opts.includeUnknownModels !== false,
+  };
   const now = Date.now() / 1000;
   const d7 = now - 7 * 86400;
   const d30 = now - 30 * 86400;
@@ -25,21 +34,21 @@ export function buildAggregates(sessions, tz, sessionView = null) {
 
   const overview = buildOverview(sessions, groupedSessions, d7, d30);
   const repos = {
-    total: buildRepos(rawBuckets.total),
-    d7: buildRepos(rawBuckets.d7),
-    d30: buildRepos(rawBuckets.d30),
+    total: buildRepos(rawBuckets.total, aggregateOpts),
+    d7: buildRepos(rawBuckets.d7, aggregateOpts),
+    d30: buildRepos(rawBuckets.d30, aggregateOpts),
   };
   const models = {
-    total: buildModels(rawBuckets.total),
-    d7: buildModels(rawBuckets.d7),
-    d30: buildModels(rawBuckets.d30),
+    total: buildModels(rawBuckets.total, aggregateOpts),
+    d7: buildModels(rawBuckets.d7, aggregateOpts),
+    d30: buildModels(rawBuckets.d30, aggregateOpts),
   };
   const families = {
     total: buildFamilies(rawBuckets.total),
     d7: buildFamilies(rawBuckets.d7),
     d30: buildFamilies(rawBuckets.d30),
   };
-  const daily = buildDaily(sessions, groupedSessions, tz);
+  const daily = buildDaily(sessions, groupedSessions, tz, aggregateOpts);
   const heatmap = buildHeatmap(sessions, groupedSessions, tz);
 
   return { overview, repos, models, daily, heatmap, families };
@@ -135,7 +144,7 @@ function buildOverview(rawSessions, groupedSessions, d7, d30) {
   };
 }
 
-function buildRepos(sessions) {
+function buildRepos(sessions, opts) {
   const map = new Map();
   for (const s of sessions) {
     const key = s.repo_label;
@@ -163,15 +172,17 @@ function buildRepos(sessions) {
     }
     r.sessions++;
 
-    const mKey = s.model_name || 'unknown';
-    if (!r.by_model[mKey]) r.by_model[mKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
-    r.by_model[mKey].tokens += s.tokens_used;
-    if (s.cost !== null) {
-      r.by_model[mKey].cost += s.cost;
-      if (s.cost_source === 'exact') r.by_model[mKey].exact_priced++;
-      if (s.cost_source === 'heuristic') r.by_model[mKey].heuristic_priced++;
+    const mKey = modelKeyFor(s, opts);
+    if (mKey) {
+      if (!r.by_model[mKey]) r.by_model[mKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
+      r.by_model[mKey].tokens += s.tokens_used;
+      if (s.cost !== null) {
+        r.by_model[mKey].cost += s.cost;
+        if (s.cost_source === 'exact') r.by_model[mKey].exact_priced++;
+        if (s.cost_source === 'heuristic') r.by_model[mKey].heuristic_priced++;
+      }
+      r.by_model[mKey].sessions++;
     }
-    r.by_model[mKey].sessions++;
 
     const fKey = s.agent_family;
     if (!r.by_family[fKey]) r.by_family[fKey] = { tokens: 0, cost: 0, sessions: 0, exact_priced: 0, heuristic_priced: 0 };
@@ -186,10 +197,11 @@ function buildRepos(sessions) {
   return [...map.values()].sort((a, b) => b.tokens - a.tokens);
 }
 
-function buildModels(sessions) {
+function buildModels(sessions, opts) {
   const map = new Map();
   for (const s of sessions) {
-    const key = s.model_name || 'unknown';
+    const key = modelKeyFor(s, opts);
+    if (!key) continue;
     if (!map.has(key)) map.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0, by_effort: {} });
     const m = map.get(key);
     m.tokens += s.tokens_used;
@@ -230,7 +242,7 @@ function buildFamilies(sessions) {
   return [...map.values()].sort((a, b) => b.tokens - a.tokens);
 }
 
-function buildDaily(rawSessions, groupedSessions, tz) {
+function buildDaily(rawSessions, groupedSessions, tz, opts) {
   const dayMap = new Map();
   for (const s of rawSessions) {
     if (!s.started_at || !s.ended_at) continue;
@@ -242,10 +254,10 @@ function buildDaily(rawSessions, groupedSessions, tz) {
 
     if (s.has_usage_by_day) {
       addSessionPresence(dayMap, startMs, endMs, totalDur, tz, s);
-      addUsageByDay(dayMap, s);
+      addUsageByDay(dayMap, s, opts);
     } else {
       for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
-        addToDay(dayMap, dayKey, s, overlapMs / totalDur);
+        addToDay(dayMap, dayKey, s, overlapMs / totalDur, opts);
       }
     }
   }
@@ -253,7 +265,7 @@ function buildDaily(rawSessions, groupedSessions, tz) {
   for (const s of rawSessions) {
     if (!s.active_by_day) continue;
     for (const [dayKey, seconds] of Object.entries(s.active_by_day)) {
-      addElapsedToDay(dayMap, dayKey, s, seconds || 0);
+      addElapsedToDay(dayMap, dayKey, s, seconds || 0, opts);
     }
   }
 
@@ -278,17 +290,19 @@ function buildDaily(rawSessions, groupedSessions, tz) {
     }));
 }
 
-function addToDay(dayMap, dayKey, session, fraction) {
+function addToDay(dayMap, dayKey, session, fraction, opts) {
   if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
   const d = dayMap.get(dayKey);
   d.tokens += session.tokens_used * fraction;
   if (session.cost !== null) d.cost += session.cost * fraction;
   if (fraction > 0.001) d.sessions++;
 
-  const mKey = session.model_name || 'unknown';
-  if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
-  d.by_model[mKey].tokens += session.tokens_used * fraction;
-  if (session.cost !== null) d.by_model[mKey].cost += session.cost * fraction;
+  const mKey = modelKeyFor(session, opts);
+  if (mKey) {
+    if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
+    d.by_model[mKey].tokens += session.tokens_used * fraction;
+    if (session.cost !== null) d.by_model[mKey].cost += session.cost * fraction;
+  }
 
   const fKey = session.agent_family;
   if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
@@ -380,7 +394,7 @@ function addPresenceToDay(dayMap, dayKey, session, fraction) {
   if (fraction > 0.001) d.by_repo[rKey].sessions++;
 }
 
-function addUsageByDay(dayMap, session) {
+function addUsageByDay(dayMap, session, opts) {
   for (const usageDay of session.usage_by_day || []) {
     const dayKey = usageDay.day;
     if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
@@ -388,10 +402,12 @@ function addUsageByDay(dayMap, session) {
     d.tokens += usageDay.tokens || 0;
     if (usageDay.cost !== null) d.cost += usageDay.cost;
 
-    const mKey = session.model_name || 'unknown';
-    if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
-    d.by_model[mKey].tokens += usageDay.tokens || 0;
-    if (usageDay.cost !== null) d.by_model[mKey].cost += usageDay.cost;
+    const mKey = modelKeyFor(session, opts);
+    if (mKey) {
+      if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
+      d.by_model[mKey].tokens += usageDay.tokens || 0;
+      if (usageDay.cost !== null) d.by_model[mKey].cost += usageDay.cost;
+    }
 
     const fKey = session.agent_family;
     if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
@@ -405,15 +421,17 @@ function addUsageByDay(dayMap, session) {
   }
 }
 
-function addElapsedToDay(dayMap, dayKey, session, seconds) {
+function addElapsedToDay(dayMap, dayKey, session, seconds, opts) {
   if (!seconds) return;
   if (!dayMap.has(dayKey)) dayMap.set(dayKey, { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0, by_model: {}, by_family: {}, by_repo: {} });
   const d = dayMap.get(dayKey);
   d.elapsed_seconds += seconds;
 
-  const mKey = session.model_name || 'unknown';
-  if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
-  d.by_model[mKey].elapsed_seconds += seconds;
+  const mKey = modelKeyFor(session, opts);
+  if (mKey) {
+    if (!d.by_model[mKey]) d.by_model[mKey] = { tokens: 0, cost: 0, elapsed_seconds: 0 };
+    d.by_model[mKey].elapsed_seconds += seconds;
+  }
 
   const fKey = session.agent_family || 'generic';
   if (!d.by_family[fKey]) d.by_family[fKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assignRootThreadIds } from '../server/ingest.js';
-import { buildSessionView } from '../server/aggregator.js';
+import { buildAggregates, buildSessionView } from '../server/aggregator.js';
 import { createDayKeyFormatter } from '../server/day-key.js';
 
 const toDayKey = createDayKeyFormatter('Europe/Berlin');
@@ -203,4 +203,41 @@ test('mixed grouped sessions summarize visible metadata as mixed instead of proj
   assert.equal(grouped[0].model_name, 'mixed');
   assert.equal(grouped[0].reasoning_effort, 'mixed');
   assert.equal(grouped[0].agent_role, 'mixed');
+});
+
+test('aggregates can omit unknown model buckets without dropping session totals', () => {
+  const sessions = [
+    makeSession({
+      thread_id: 'known',
+      started_at: Date.parse('2026-03-05T09:00:00Z') / 1000,
+      ended_at: Date.parse('2026-03-05T09:30:00Z') / 1000,
+      model_name: 'gpt-5.4',
+      tokens_used: 100,
+      cost: 1,
+    }),
+    makeSession({
+      thread_id: 'unknown-model',
+      started_at: Date.parse('2026-03-05T10:00:00Z') / 1000,
+      ended_at: Date.parse('2026-03-05T10:30:00Z') / 1000,
+      model_name: null,
+      tokens_used: 200,
+      cost: null,
+      cost_source: 'unavailable',
+    }),
+  ];
+
+  const aggregates = buildAggregates(sessions, 'Europe/Berlin', null, {
+    includeUnknownModels: false,
+  });
+  const day = aggregates.daily.find((entry) => entry.date === '2026-03-05');
+  const repo = aggregates.repos.total.find((entry) => entry.repo_label === 'demo');
+
+  assert.equal(aggregates.overview.total.total_tokens, 300);
+  assert.deepEqual(aggregates.models.total.map((entry) => entry.model_name), ['gpt-5.4']);
+  assert.equal(day.tokens, 300);
+  assert.equal(day.by_model.unknown, undefined);
+  assert.equal(day.by_model['gpt-5.4'].tokens, 100);
+  assert.equal(repo.tokens, 300);
+  assert.equal(repo.by_model.unknown, undefined);
+  assert.equal(repo.by_model['gpt-5.4'].tokens, 100);
 });
