@@ -82,8 +82,10 @@ export function buildLiveDataEnvelope(liveState) {
   };
 }
 
-export function shouldUseLiveData(liveData, { overviewIngestActive = false, settledOverviewReady = false } = {}) {
-  return Boolean(liveData && (overviewIngestActive || !settledOverviewReady));
+export function shouldUseLiveData(liveData, { overviewIngestActive = false, settledOverviewReady = false, backendComplete = false } = {}) {
+  if (!liveData) return false;
+  if (!settledOverviewReady) return true;
+  return Boolean(overviewIngestActive && !backendComplete);
 }
 
 export function hasLiveRows(envelope) {

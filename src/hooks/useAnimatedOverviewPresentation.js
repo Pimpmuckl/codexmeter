@@ -34,6 +34,7 @@ export function useAnimatedOverviewPresentation(
   const tweenFromRef = useRef(target);
   const tweenTargetRef = useRef(target);
   const tweenModeRef = useRef('smooth');
+  const wasIngestActiveRef = useRef(isIngestActive);
 
   useEffect(() => {
     onSettledChangeRef.current = onSettledChange;
@@ -143,6 +144,14 @@ export function useAnimatedOverviewPresentation(
   };
 
   useLayoutEffect(() => {
+    const justEndedIngest = wasIngestActiveRef.current && !isIngestActive;
+    wasIngestActiveRef.current = isIngestActive;
+    if (justEndedIngest) {
+      applyImmediateTarget(target);
+    }
+  }, [isIngestActive, target]);
+
+  useLayoutEffect(() => {
     if (clockNowMs == null) return undefined;
     if (duration <= 0) {
       applyImmediateTarget(target);
@@ -160,6 +169,7 @@ export function useAnimatedOverviewPresentation(
       applyImmediateTarget(target);
       return undefined;
     }
+    if (currentRef.current === target && settledRef.current) return undefined;
     prepareTargetTransition(target);
     if (frameRef.current) return undefined;
     const step = (now) => {

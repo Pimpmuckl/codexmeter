@@ -8,6 +8,7 @@ test('live ingest data wins over partial settled data', () => {
   assert.equal(shouldUseLiveData(liveData, { overviewIngestActive: true, settledOverviewReady: true }), true);
   assert.equal(shouldUseLiveData(liveData, { overviewIngestActive: false, settledOverviewReady: true }), false);
   assert.equal(shouldUseLiveData(liveData, { overviewIngestActive: false, settledOverviewReady: false }), true);
+  assert.equal(shouldUseLiveData(liveData, { overviewIngestActive: true, settledOverviewReady: true, backendComplete: true }), false);
 });
 
 test('empty live sections do not hide settled tab rows', () => {

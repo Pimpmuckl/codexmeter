@@ -300,16 +300,17 @@ export default function App() {
         try {
           const p = await api.progress();
           if (!alive) return;
+          if (p.complete) {
+            await fetchAll();
+            setProgress(p);
+            clearInterval(interval);
+            return;
+          }
+
           setProgress(p);
 
           if (p.percent > 0.08) {
             await fetchAll();
-          }
-
-          if (p.complete) {
-            await fetchAll();
-            clearInterval(interval);
-            return;
           }
 
           if (p.error || p.phase === 'error') {
@@ -368,12 +369,12 @@ export default function App() {
         if (!alive) return;
         const payload = JSON.parse(event.data);
         terminalSseState = true;
-        enqueueLivePayload(payload, payload.data ? 'complete' : 'progress', !payload.data);
         await ensureSettledDataLoaded(payload.progress, payload.ingest_id, {
           hydrateLiveState: true,
           seq: (payload.seq || 0) + 1,
         });
         if (!alive) return;
+        enqueueLivePayload(payload, payload.data ? 'complete' : 'progress', !payload.data);
         source?.close();
       });
 
@@ -439,7 +440,7 @@ export default function App() {
   const pct = Math.round((progress?.percent || 0) * 100);
   const overviewIngestProgress = Math.min(Math.max(progress?.percent || 0, 0), 1);
   const visibleIngesting = !backendComplete || completionPresentationPending;
-  const overviewIngestActive = Boolean(progress && visibleIngesting && progress.phase !== 'error');
+  const overviewIngestActive = Boolean(progress && !backendComplete && visibleIngesting && progress.phase !== 'error');
 
   useEffect(() => {
     if (!progress?.complete) {
@@ -518,8 +519,8 @@ export default function App() {
   const liveData = useMemo(() => (
     liveState ? buildLiveDataEnvelope(liveState) : null
   ), [liveState]);
-  const settledOverviewReady = dataReady;
-  const useLiveData = shouldUseLiveData(liveData, { overviewIngestActive, settledOverviewReady });
+  const settledOverviewReady = dataReady && (!backendComplete || data.overview?.complete);
+  const useLiveData = shouldUseLiveData(liveData, { overviewIngestActive, settledOverviewReady, backendComplete });
   const overviewData = useLiveData ? liveData.overview : (data.overview || liveData?.overview);
   const overviewHeatmap = useLiveData ? liveData.heatmap : (data.heatmap || liveData?.heatmap);
   const overviewDaily = chooseLiveEnvelope(liveData?.daily, data.daily || liveData?.daily, useLiveData);
