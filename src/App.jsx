@@ -189,6 +189,7 @@ export default function App() {
     let usingFallback = false;
     let terminalSseState = false;
     let settledFetchStarted = false;
+    let partialFetchStarted = false;
     let queuedEvents = [];
     let frameId = 0;
     let liveStateRef = null;
@@ -270,13 +271,25 @@ export default function App() {
     };
 
     const ensureSettledDataLoaded = async (nextProgress, ingestId = null, { hydrateLiveState = false, seq = 0 } = {}) => {
-      if (!alive || !nextProgress?.complete || settledFetchStarted) return;
-      settledFetchStarted = true;
-      const nextData = await fetchAll();
-      if (alive && hydrateLiveState) {
-        hydrateLiveStateFromSettled(nextData, ingestId, seq);
+      if (!alive || !nextProgress) return;
+      if (nextProgress.complete) {
+        if (settledFetchStarted) return;
+        settledFetchStarted = true;
+        const nextData = await fetchAll();
+        if (alive && hydrateLiveState) {
+          hydrateLiveStateFromSettled(nextData, ingestId, seq);
+        }
+        return nextData;
       }
-      return nextData;
+      if (nextProgress.partial_ready && !partialFetchStarted) {
+        partialFetchStarted = true;
+        try {
+          return await fetchAll();
+        } catch (err) {
+          partialFetchStarted = false;
+          throw err;
+        }
+      }
     };
 
     const startFallbackPolling = () => {
@@ -406,7 +419,7 @@ export default function App() {
 
   useEffect(() => {
     if (!progress) return;
-    const hasLiveOrEnoughProgress = initialLiveReady || progress.percent > 0.08;
+    const hasLiveOrEnoughProgress = initialLiveReady || progress.partial_ready || progress.percent > 0.08;
     if (hasLiveOrEnoughProgress && showOverlay && !fadingOut) {
       setFadingOut(true);
       const timer = setTimeout(() => setShowOverlay(false), 600);
@@ -420,6 +433,8 @@ export default function App() {
   }, [progress, initialLiveReady, showOverlay, fadingOut]);
 
   const backendComplete = Boolean(progress?.complete);
+  const dataReady = Boolean(data.overview?.data);
+  const interactionReady = backendComplete || dataReady;
   const complete = backendComplete;
   const pct = Math.round((progress?.percent || 0) * 100);
   const overviewIngestProgress = Math.min(Math.max(progress?.percent || 0, 0), 1);
@@ -503,7 +518,7 @@ export default function App() {
   const liveData = useMemo(() => (
     liveState ? buildLiveDataEnvelope(liveState) : null
   ), [liveState]);
-  const settledOverviewReady = Boolean(data.overview?.complete && data.overview?.data);
+  const settledOverviewReady = dataReady;
   const useLiveData = Boolean(liveData && !settledOverviewReady);
   const overviewData = useLiveData ? liveData.overview : (data.overview || liveData?.overview);
   const overviewHeatmap = useLiveData ? liveData.heatmap : (data.heatmap || liveData?.heatmap);
@@ -659,9 +674,9 @@ export default function App() {
             {TABS.map(t => (
               <button
                 key={t}
-                className={`navbar-tab ${tab === t ? 'active' : ''} ${!(backendComplete && ingestFadeDone) && t !== 'Overview' ? 'navbar-tab-dimmed' : ''}`}
+                className={`navbar-tab ${tab === t ? 'active' : ''} ${!interactionReady && t !== 'Overview' ? 'navbar-tab-dimmed' : ''}`}
                 onClick={() => setTab(t)}
-                disabled={!backendComplete && t !== 'Overview'}
+                disabled={!interactionReady && t !== 'Overview'}
               >
                 {t}
               </button>
@@ -669,13 +684,13 @@ export default function App() {
           </div>
           <div className="navbar-meta">
             {navbarDateRange && (
-              <div className={`navbar-date-wrap ${!backendComplete ? 'navbar-date-wrap-dimmed' : ''}`}>
+              <div className={`navbar-date-wrap ${!interactionReady ? 'navbar-date-wrap-dimmed' : ''}`}>
                 <span className="navbar-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                   {fmtDate(displayDateRange?.from || navbarDateRange.from)} — {fmtDate(displayDateRange?.to || navbarDateRange.to)}
                 </span>
                 <div className="range-toggle">
                   {RANGES.map(r => (
-                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)} disabled={!backendComplete}>
+                    <button key={r.key} className={`range-btn ${range === r.key ? 'active' : ''}`} onClick={() => setRange(r.key)} disabled={!interactionReady}>
                       {r.label}
                     </button>
                   ))}

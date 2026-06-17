@@ -28,6 +28,7 @@ export function createServer(codexHome, opts = {}) {
       enriched: state.enriched,
       current_date_bucket: state.current_date_bucket,
       percent: state.percent,
+      partial_ready: state.partial_ready,
       complete: state.complete,
       error: state.error,
     });

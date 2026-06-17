@@ -1,10 +1,8 @@
+const dayFormatterCache = new Map();
+const zonedDayStartCache = new Map();
+
 export function createDayKeyFormatter(tz) {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
+  const formatter = getDayFormatter(tz);
 
   return (ms) => {
     const parts = formatter.formatToParts(new Date(ms));
@@ -22,6 +20,9 @@ export function addDaysToDayKey(dayKey, days) {
 }
 
 export function getZonedDayStartMs(dayKey, tz) {
+  const cacheKey = `${tz}\0${dayKey}`;
+  if (zonedDayStartCache.has(cacheKey)) return zonedDayStartCache.get(cacheKey);
+
   const toDayKey = createDayKeyFormatter(tz);
   const guess = Date.parse(`${dayKey}T00:00:00Z`);
   let low = guess - 36 * 60 * 60 * 1000;
@@ -33,6 +34,7 @@ export function getZonedDayStartMs(dayKey, tz) {
     else high = mid;
   }
 
+  zonedDayStartCache.set(cacheKey, low);
   return low;
 }
 
@@ -57,4 +59,16 @@ export function splitIntervalByDay(startMs, endMs, tz) {
   }
 
   return result;
+}
+
+function getDayFormatter(tz) {
+  if (!dayFormatterCache.has(tz)) {
+    dayFormatterCache.set(tz, new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }));
+  }
+  return dayFormatterCache.get(tz);
 }

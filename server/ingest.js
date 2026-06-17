@@ -34,6 +34,7 @@ export function createIngestState() {
     enriched: 0,
     current_date_bucket: null,
     percent: 0,
+    partial_ready: false,
     complete: false,
     error: null,
     sessions: [],
@@ -143,6 +144,8 @@ export async function runIngest(codexHome, state, opts = {}) {
 
     state.phase = 'enrichment';
     queueLiveProgress(state);
+
+    publishPartialAggregates(sessions, state, opts, tz, toDayKey);
 
     const bootstrapCandidates = sessions.filter((session) => !session.rollout_path);
     if (bootstrapCandidates.length) {
@@ -356,6 +359,7 @@ export function restartIngest(codexHome, state, opts = {}) {
   state.enriched = 0;
   state.current_date_bucket = null;
   state.percent = 0;
+  state.partial_ready = false;
   state.complete = false;
   state.error = null;
   state.sessions = [];
@@ -381,6 +385,17 @@ function rebuildAggregates(sessions, state, opts, tz, mode = {}) {
   state.sessions = sessionView;
   state.aggregates = buildAggregates(filtered, tz, sessionView);
   state.generated_at = new Date().toISOString();
+}
+
+function publishPartialAggregates(sessions, state, opts, tz, toDayKey) {
+  for (const session of sessions) {
+    finalizeSessionMetrics(session, toDayKey);
+  }
+  assignRootThreadIds(sessions, toDayKey);
+  rebuildAggregates(sessions, state, opts, tz);
+  state.partial_ready = true;
+  state.percent = Math.max(state.percent, 0.081);
+  queueLiveProgress(state);
 }
 
 export function filterVisibleSessions(sessions) {
@@ -875,6 +890,7 @@ function progressPayload(state) {
     enriched: state.enriched,
     current_date_bucket: state.current_date_bucket,
     percent: state.percent,
+    partial_ready: state.partial_ready,
     complete: state.complete,
     error: state.error,
     generated_at: state.generated_at,

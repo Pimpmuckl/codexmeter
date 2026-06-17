@@ -76,6 +76,9 @@ test('ingest preserves raw SQLite model when rollout file is missing', async () 
     const state = createIngestState();
     await runIngest(fixture.codexHome, state, { timezone: 'Europe/Berlin', workerThreads: 1 });
 
+    assert.equal(state.partial_ready, true);
+    assert.equal(state.aggregates.overview.total.total_tokens, 1_000_000);
+
     const session = state.sessions.find((row) => row.thread_id === 'fallback-model-thread');
     assert.ok(session);
     assert.equal(session.model_name, 'gpt-5.4');
