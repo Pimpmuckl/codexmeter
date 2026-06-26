@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAggregates } from '../server/aggregator.js';
-import { createLiveAggregateState, createEmptyLivePatch, applySessionToLiveState, buildLiveBootstrap } from '../server/live-state.js';
+import { createLiveAggregateState, applySessionToLiveState, buildLiveBootstrap } from '../server/live-state.js';
 import { splitIntervalByDay } from '../server/day-key.js';
 
 function makeSession() {
@@ -43,9 +43,8 @@ test('daily aggregates include elapsed seconds for model and family breakdowns',
 test('live daily bootstrap includes elapsed seconds for model and family breakdowns', () => {
   const session = makeSession();
   const live = createLiveAggregateState('Europe/Berlin');
-  const patch = createEmptyLivePatch();
 
-  applySessionToLiveState(live, session, patch);
+  applySessionToLiveState(live, session);
   const bootstrap = buildLiveBootstrap(live);
   const day = bootstrap.daily['2025-04-10'];
 
@@ -94,8 +93,7 @@ test('settled and live daily buckets split sessions across timezone midnight', (
   assert.equal(aggregates.heatmap['2026-04-11']?.sessions, 1);
 
   const live = createLiveAggregateState('Europe/Berlin');
-  const patch = createEmptyLivePatch();
-  applySessionToLiveState(live, session, patch);
+  applySessionToLiveState(live, session);
   const bootstrap = buildLiveBootstrap(live);
   assert.equal(bootstrap.daily['2026-04-10']?.tokens, 100);
   assert.equal(bootstrap.daily['2026-04-11']?.tokens, 100);

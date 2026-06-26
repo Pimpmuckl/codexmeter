@@ -353,12 +353,6 @@ export default function App() {
         });
       });
 
-      source.addEventListener('patch', (event) => {
-        if (!alive) return;
-        const payload = JSON.parse(event.data);
-        enqueueLivePayload(payload, 'patch');
-      });
-
       source.addEventListener('snapshot', (event) => {
         if (!alive) return;
         const payload = JSON.parse(event.data);

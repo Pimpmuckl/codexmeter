@@ -32,7 +32,7 @@ export const api = {
   repos: () => fetchJson('/api/repos'),
   models: () => fetchJson('/api/models'),
   daily: () => fetchJson('/api/daily'),
-  sessions: (q = '') => fetchJson(`/api/sessions${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  sessions: () => fetchJson('/api/sessions'),
   heatmap: () => fetchJson('/api/heatmap'),
   families: () => fetchJson('/api/families'),
   live: () => new EventSource(apiUrl('/api/live')),

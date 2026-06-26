@@ -20,38 +20,23 @@ export function mergeLiveEvent(prev, payload, mode) {
   next.ingest_id = payload.ingest_id;
   next.seq = payload.seq;
 
-  if (payload.data?.overview) {
-    next.overview = {
-      ...next.overview,
-      ...payload.data.overview,
-      total: payload.data.overview.total ? { ...next.overview.total, ...payload.data.overview.total } : next.overview.total,
-      d7: payload.data.overview.d7 ? { ...next.overview.d7, ...payload.data.overview.d7 } : next.overview.d7,
-      d30: payload.data.overview.d30 ? { ...next.overview.d30, ...payload.data.overview.d30 } : next.overview.d30,
-    };
+  if (payload.data) {
+    next.overview = payload.data.overview || next.overview;
+    next.repos = payload.data.repos || next.repos;
+    next.models = payload.data.models || next.models;
+    next.families = payload.data.families || next.families;
+    next.daily = payload.data.daily || next.daily;
+    next.heatmap = payload.data.heatmap || next.heatmap;
   } else if (prev) {
     next.overview = prev.overview;
+    next.repos = prev.repos;
+    next.models = prev.models;
+    next.families = prev.families;
+    next.daily = prev.daily;
+    next.heatmap = prev.heatmap;
   }
-
-  next.repos = mergeRangeObjects(prev?.repos, payload.data?.repos, next.repos);
-  next.models = mergeRangeObjects(prev?.models, payload.data?.models, next.models);
-  next.families = mergeRangeObjects(prev?.families, payload.data?.families, next.families);
-  next.daily = payload.data?.daily ? { ...(prev?.daily || {}), ...payload.data.daily } : (prev?.daily || next.daily);
-  next.heatmap = payload.data?.heatmap ? { ...(prev?.heatmap || {}), ...payload.data.heatmap } : (prev?.heatmap || next.heatmap);
 
   return next;
-}
-
-function mergeRangeObjects(prevTarget, source, fallbackTarget) {
-  if (!source) return prevTarget || fallbackTarget;
-  const target = {
-    total: prevTarget ? prevTarget.total : fallbackTarget.total,
-    d7: prevTarget ? prevTarget.d7 : fallbackTarget.d7,
-    d30: prevTarget ? prevTarget.d30 : fallbackTarget.d30,
-  };
-  for (const rangeKey of ['total', 'd7', 'd30']) {
-    if (source[rangeKey]) target[rangeKey] = source[rangeKey];
-  }
-  return target;
 }
 
 export function buildLiveDataEnvelope(liveState) {

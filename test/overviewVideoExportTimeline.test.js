@@ -92,9 +92,9 @@ function buildRenderData({ replayEasing = 'cubicIn', tailEasing = 'cubicOut' } =
         },
       },
       events: [
-        { event: 'patch', at_ms: 200, payload: { ingest_id: 'ingest-1', seq: 1, ...buildPayload(30, 2) } },
-        { event: 'patch', at_ms: 1500, payload: { ingest_id: 'ingest-1', seq: 2, ...buildPayload(60, 4) } },
-        { event: 'patch', at_ms: 3000, payload: { ingest_id: 'ingest-1', seq: 3, ...buildPayload(100, 6) } },
+        { event: 'snapshot', at_ms: 200, payload: { ingest_id: 'ingest-1', seq: 1, ...buildPayload(30, 2) } },
+        { event: 'snapshot', at_ms: 1500, payload: { ingest_id: 'ingest-1', seq: 2, ...buildPayload(60, 4) } },
+        { event: 'snapshot', at_ms: 3000, payload: { ingest_id: 'ingest-1', seq: 3, ...buildPayload(100, 6) } },
       ],
     },
   };
