@@ -160,23 +160,8 @@ export function createServer(codexHome, opts = {}) {
     res.download(job.output_path, job.file_name || `codexmeter-overview-${job.id}.mp4`);
   });
 
-  app.get('/api/sessions', (req, res) => {
-    const q = (req.query.q || '').toLowerCase();
-    let sessions = state.sessions || [];
-    if (q) {
-      sessions = sessions.filter(s =>
-        (s.repo_label?.toLowerCase().includes(q)) ||
-        (s.model_name?.toLowerCase().includes(q)) ||
-        (s.agent_role?.toLowerCase().includes(q)) ||
-        (s.agent_nickname?.toLowerCase().includes(q)) ||
-        (s.title?.toLowerCase().includes(q)) ||
-        (s.descendant_models || []).some(v => v?.toLowerCase().includes(q)) ||
-        (s.descendant_families || []).some(v => v?.toLowerCase().includes(q)) ||
-        (s.descendant_roles || []).some(v => v?.toLowerCase().includes(q)) ||
-        (s.descendant_nicknames || []).some(v => v?.toLowerCase().includes(q)) ||
-        (s.related_titles || []).some(v => v?.toLowerCase().includes(q))
-      );
-    }
+  app.get('/api/sessions', (_req, res) => {
+    const sessions = state.sessions || [];
     res.json({
       data: sessions.map(s => ({
         thread_id: s.thread_id, root_thread_id: s.root_thread_id, repo_label: s.repo_label,

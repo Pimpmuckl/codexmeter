@@ -15,7 +15,7 @@ test('replay snapshot exposes completed replay and returns cloned payloads', () 
     progress: { percent: 0.1, complete: false },
     data: { overview: { total: { total_tokens: 10 } } },
   });
-  recordReplayEvent(replay, 'patch', {
+  recordReplayEvent(replay, 'snapshot', {
     ingest_id: 'ingest-1',
     seq: 1,
     progress: { percent: 0.5, complete: false },
@@ -30,7 +30,7 @@ test('replay snapshot exposes completed replay and returns cloned payloads', () 
   const snapshot = getReplaySnapshot(replay);
   assert.equal(snapshot.ready, true);
   assert.equal(snapshot.events.length, 2);
-  assert.equal(snapshot.events[0].mode, 'patch');
+  assert.equal(snapshot.events[0].mode, 'snapshot');
   assert.equal(snapshot.events[1].mode, 'progress');
 
   snapshot.bootstrap.payload.data.overview.total.total_tokens = 999;

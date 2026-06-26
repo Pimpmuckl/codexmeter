@@ -49,33 +49,20 @@ export function createLiveAggregateState(tz) {
   };
 }
 
-export function createEmptyLivePatch() {
-  return {
-    overview: new Set(),
-    repos: { total: new Set(), d7: new Set(), d30: new Set() },
-    models: { total: new Set(), d7: new Set(), d30: new Set() },
-    families: { total: new Set(), d7: new Set(), d30: new Set() },
-    daily: new Set(),
-    heatmap: new Set(),
-  };
-}
-
-export function applySessionToLiveState(live, session, patch) {
+export function applySessionToLiveState(live, session) {
   const rootId = session.root_thread_id || session.thread_id;
 
   for (const rangeKey of ['total', 'd7', 'd30']) {
     if (!overlapsLowerBound(session, live.lowerBounds[rangeKey])) continue;
 
     applyOverviewBucket(live.overview[rangeKey], session, rootId);
-    patch.overview.add(rangeKey);
-
-    applyRepoBucket(live.repos[rangeKey], live.repoTopKeys[rangeKey], session, patch.repos[rangeKey]);
-    applyModelBucket(live.models[rangeKey], live.modelTopKeys[rangeKey], session, patch.models[rangeKey]);
-    applyFamilyBucket(live.families[rangeKey], live.familyTopKeys[rangeKey], session, patch.families[rangeKey]);
+    applyRepoBucket(live.repos[rangeKey], live.repoTopKeys[rangeKey], session);
+    applyModelBucket(live.models[rangeKey], live.modelTopKeys[rangeKey], session);
+    applyFamilyBucket(live.families[rangeKey], live.familyTopKeys[rangeKey], session);
   }
 
-  applyDailyBucket(live.daily, session, live.tz, live.toDayKey, patch.daily);
-  applyHeatmapBucket(live.heatmap, session, live.tz, live.toDayKey, patch.heatmap);
+  applyDailyBucket(live.daily, session, live.tz, live.toDayKey);
+  applyHeatmapBucket(live.heatmap, session, live.tz, live.toDayKey);
 }
 
 export function buildLiveBootstrap(live) {
@@ -97,19 +84,6 @@ export function buildLiveSnapshot(live) {
     families: serializeTopRanges(live.families, live.familyTopKeys, serializeFamilySummary),
     daily: serializeDailySnapshot(live.daily),
     heatmap: serializeHeatmap(live.heatmap),
-  };
-}
-
-export function buildLivePatch(live, patch) {
-  return {
-    overview: Object.fromEntries(
-      [...patch.overview].map((rangeKey) => [rangeKey, serializeOverviewBucket(live.overview[rangeKey], live.lowerBounds[rangeKey])])
-    ),
-    repos: serializePatchedTopRanges(live.repos, live.repoTopKeys, patch.repos, serializeRepoSummary),
-    models: serializePatchedTopRanges(live.models, live.modelTopKeys, patch.models, serializeModelSummary),
-    families: serializePatchedTopRanges(live.families, live.familyTopKeys, patch.families, serializeFamilySummary),
-    daily: Object.fromEntries([...patch.daily].map((dayKey) => [dayKey, serializeDailyEntry(live.daily.get(dayKey))])),
-    heatmap: Object.fromEntries([...patch.heatmap].map((dayKey) => [dayKey, serializeHeatmapEntry(live.heatmap.get(dayKey))])),
   };
 }
 
@@ -164,7 +138,7 @@ function applyOverviewBucket(bucket, session, rootId) {
   if (session.ended_at && session.ended_at > bucket.latest) bucket.latest = session.ended_at;
 }
 
-function applyRepoBucket(repoMap, topKeys, session, dirtySet) {
+function applyRepoBucket(repoMap, topKeys, session) {
   const key = session.repo_label || 'unknown';
   if (!repoMap.has(key)) {
     repoMap.set(key, {
@@ -193,10 +167,9 @@ function applyRepoBucket(repoMap, topKeys, session, dirtySet) {
   addBreakdown(repo.by_family, session.agent_family || 'generic', session);
 
   updateTopKeys(repoMap, topKeys, key);
-  dirtySet.add(key);
 }
 
-function applyModelBucket(modelMap, topKeys, session, dirtySet) {
+function applyModelBucket(modelMap, topKeys, session) {
   const key = session.model_name || 'unknown';
   if (!modelMap.has(key)) {
     modelMap.set(key, { model_name: key, tokens: 0, cost: 0, cost_known: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0, by_effort: {} });
@@ -213,7 +186,6 @@ function applyModelBucket(modelMap, topKeys, session, dirtySet) {
   addBreakdown(model.by_effort, normalizeEffortKey(session.reasoning_effort), session);
 
   updateTopKeys(modelMap, topKeys, key);
-  dirtySet.add(key);
 }
 
 function addBreakdown(target, key, session) {
@@ -228,7 +200,7 @@ function addBreakdown(target, key, session) {
   }
 }
 
-function applyFamilyBucket(familyMap, topKeys, session, dirtySet) {
+function applyFamilyBucket(familyMap, topKeys, session) {
   const key = session.agent_family || 'generic';
   if (!familyMap.has(key)) {
     familyMap.set(key, { family: key, tokens: 0, cost: 0, exact_priced: 0, heuristic_priced: 0, sessions: 0 });
@@ -242,10 +214,9 @@ function applyFamilyBucket(familyMap, topKeys, session, dirtySet) {
     if (session.cost_source === 'heuristic') family.heuristic_priced += 1;
   }
   updateTopKeys(familyMap, topKeys, key);
-  dirtySet.add(key);
 }
 
-function applyDailyBucket(dayMap, session, tz, toDayKey, dirtySet) {
+function applyDailyBucket(dayMap, session, tz, toDayKey) {
   if (!session.started_at || !session.ended_at) return;
 
   const startMs = session.started_at * 1000;
@@ -253,12 +224,11 @@ function applyDailyBucket(dayMap, session, tz, toDayKey, dirtySet) {
   const totalDur = endMs - startMs;
   if (totalDur > 0) {
     if (session.has_usage_by_day) {
-      addSessionPresence(dayMap, startMs, endMs, totalDur, tz, session, dirtySet);
-      addUsageByDay(dayMap, session, dirtySet);
+      addSessionPresence(dayMap, startMs, endMs, totalDur, tz, session);
+      addUsageByDay(dayMap, session);
     } else {
       for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
         addToDay(dayMap, dayKey, session, overlapMs / totalDur);
-        dirtySet.add(dayKey);
       }
     }
   }
@@ -266,12 +236,11 @@ function applyDailyBucket(dayMap, session, tz, toDayKey, dirtySet) {
   if (session.active_by_day) {
     for (const [dayKey, seconds] of Object.entries(session.active_by_day)) {
       addElapsedToDay(dayMap, dayKey, session, seconds || 0);
-      dirtySet.add(dayKey);
     }
   }
 }
 
-function applyHeatmapBucket(dayMap, session, tz, toDayKey, dirtySet) {
+function applyHeatmapBucket(dayMap, session, tz, toDayKey) {
   const startMs = session.started_at ? session.started_at * 1000 : null;
   const endMs = (session.ended_at || session.started_at) ? (session.ended_at || session.started_at) * 1000 : null;
   const totalDur = endMs - startMs;
@@ -282,20 +251,17 @@ function applyHeatmapBucket(dayMap, session, tz, toDayKey, dirtySet) {
       const day = ensureHeatmapDay(dayMap, dayKey);
       day.tokens += usageDay.tokens || 0;
       if (usageDay.cost !== null) day.cost += usageDay.cost;
-      dirtySet.add(dayKey);
     }
     if (startMs !== null) {
       if (totalDur > 0) {
         for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
           const day = ensureHeatmapDay(dayMap, dayKey);
           if ((overlapMs / totalDur) > 0.001) day.sessions += 1;
-          dirtySet.add(dayKey);
         }
       } else {
         const startDay = toDayKey(startMs);
         const day = ensureHeatmapDay(dayMap, startDay);
         day.sessions += 1;
-        dirtySet.add(startDay);
       }
     }
   } else if (startMs !== null) {
@@ -306,7 +272,6 @@ function applyHeatmapBucket(dayMap, session, tz, toDayKey, dirtySet) {
         day.tokens += (session.tokens_used || 0) * fraction;
         if (session.cost !== null) day.cost += session.cost * fraction;
         if (fraction > 0.001) day.sessions += 1;
-        dirtySet.add(dayKey);
       }
     } else {
       const dayKey = toDayKey(startMs);
@@ -314,7 +279,6 @@ function applyHeatmapBucket(dayMap, session, tz, toDayKey, dirtySet) {
       day.tokens += session.tokens_used || 0;
       if (session.cost !== null) day.cost += session.cost;
       day.sessions += 1;
-      dirtySet.add(dayKey);
     }
   }
 
@@ -322,15 +286,13 @@ function applyHeatmapBucket(dayMap, session, tz, toDayKey, dirtySet) {
     for (const [dayKey, seconds] of Object.entries(session.active_by_day)) {
       const day = ensureHeatmapDay(dayMap, dayKey);
       day.elapsed += seconds || 0;
-      dirtySet.add(dayKey);
     }
   }
 }
 
-function addSessionPresence(dayMap, startMs, endMs, totalDur, tz, session, dirtySet) {
+function addSessionPresence(dayMap, startMs, endMs, totalDur, tz, session) {
   for (const { dayKey, overlapMs } of splitIntervalByDay(startMs, endMs, tz)) {
     addPresenceToDay(dayMap, dayKey, session, overlapMs / totalDur);
-    dirtySet.add(dayKey);
   }
 }
 
@@ -347,7 +309,7 @@ function addPresenceToDay(dayMap, dayKey, session, fraction) {
   if (fraction > 0.001) day.by_repo[repoKey].sessions += 1;
 }
 
-function addUsageByDay(dayMap, session, dirtySet) {
+function addUsageByDay(dayMap, session) {
   for (const usageDay of session.usage_by_day || []) {
     const dayKey = usageDay.day;
     const day = ensureDay(dayMap, dayKey);
@@ -368,7 +330,6 @@ function addUsageByDay(dayMap, session, dirtySet) {
     if (!day.by_repo[repoKey]) day.by_repo[repoKey] = { tokens: 0, cost: 0, elapsed_seconds: 0, sessions: 0 };
     day.by_repo[repoKey].tokens += usageDay.tokens || 0;
     if (usageDay.cost !== null) day.by_repo[repoKey].cost += usageDay.cost;
-    dirtySet.add(dayKey);
   }
 }
 
@@ -472,16 +433,6 @@ function serializeTopRanges(rangeMaps, topKeyRanges, projector) {
     d7: serializeTopRange(rangeMaps.d7, topKeyRanges.d7, projector),
     d30: serializeTopRange(rangeMaps.d30, topKeyRanges.d30, projector),
   };
-}
-
-function serializePatchedTopRanges(rangeMaps, topKeyRanges, dirtyRanges, projector) {
-  const out = {};
-  for (const rangeKey of ['total', 'd7', 'd30']) {
-    if (dirtyRanges[rangeKey].size > 0) {
-      out[rangeKey] = serializeTopRange(rangeMaps[rangeKey], topKeyRanges[rangeKey], projector);
-    }
-  }
-  return out;
 }
 
 function serializeTopRange(map, topKeys, projector) {

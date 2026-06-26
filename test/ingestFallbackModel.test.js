@@ -74,7 +74,7 @@ test('ingest preserves raw SQLite model when rollout file is missing', async () 
 
   try {
     const state = createIngestState();
-    await runIngest(fixture.codexHome, state, { timezone: 'Europe/Berlin', workerThreads: 1 });
+    await runIngest(fixture.codexHome, state, { timezone: 'Europe/Berlin' });
 
     assert.equal(state.partial_ready, true);
     assert.equal(state.aggregates.overview.total.total_tokens, 1_000_000);

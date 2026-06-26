@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   applySessionToLiveState,
   buildLiveBootstrap,
-  createEmptyLivePatch,
   createLiveAggregateState,
 } from '../server/live-state.js';
 
@@ -26,9 +25,8 @@ test('live top summaries include drilldown breakdowns', () => {
     has_usage_by_day: false,
   };
   const live = createLiveAggregateState('UTC');
-  const patch = createEmptyLivePatch();
 
-  applySessionToLiveState(live, session, patch);
+  applySessionToLiveState(live, session);
   const bootstrap = buildLiveBootstrap(live);
   const repo = bootstrap.repos.total[0];
   const model = bootstrap.models.total[0];

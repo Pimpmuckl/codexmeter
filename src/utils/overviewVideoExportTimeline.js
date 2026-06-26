@@ -335,7 +335,6 @@ function buildSettledPresentation(renderData) {
 
 function isReplayDataEvent(event) {
   return event?.payload?.data && (
-    event.event === 'patch' ||
     event.event === 'snapshot' ||
     event.event === 'complete'
   );

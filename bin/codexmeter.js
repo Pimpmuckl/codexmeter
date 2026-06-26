@@ -7,20 +7,6 @@ import { createServer } from '../server/index.js';
 
 const defaultCodexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 
-function parseBooleanEnv(name, defaultValue = false) {
-  const value = process.env[name];
-  if (value == null || value === '') return defaultValue;
-  const normalized = String(value).toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  return defaultValue;
-}
-
-function parseNumberEnv(name, defaultValue = undefined) {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 ? value : defaultValue;
-}
-
 function parseIsoDateOption(name, value) {
   if (!value) return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -52,29 +38,6 @@ if (from && to && from > to) {
   program.error('--from must be earlier than or equal to --to');
 }
 
-const ingestToggles = {
-  ingestTiming: parseBooleanEnv('CODEXMETER_INGEST_TIMING'),
-  workerThreads: parseNumberEnv('CODEXMETER_WORKER_THREADS'),
-  batchSize: parseNumberEnv('CODEXMETER_BATCH_SIZE'),
-  fastRolloutReader: parseBooleanEnv('CODEXMETER_FAST_ROLLOUT_READER'),
-  rgRolloutReader: parseBooleanEnv('CODEXMETER_RG_ROLLOUT_READER', true),
-  rgMinBytes: parseNumberEnv('CODEXMETER_RG_MIN_BYTES'),
-  streamRolloutChunks: parseBooleanEnv('CODEXMETER_STREAM_ROLLOUT_CHUNKS', true),
-  forkCorrectionConcurrency: parseNumberEnv('CODEXMETER_FORK_CORRECTION_CONCURRENCY', 32),
-  resultChunkSize: parseNumberEnv('CODEXMETER_RESULT_CHUNK_SIZE'),
-  recentFirstDays: parseNumberEnv('CODEXMETER_RECENT_FIRST_DAYS'),
-  warmupOldestCount: parseNumberEnv('CODEXMETER_WARMUP_OLDEST_COUNT'),
-};
-
-const activeIngestToggles = Object.entries(ingestToggles)
-  .filter(([, value]) => value !== false && value !== undefined);
-if (activeIngestToggles.length) {
-  const label = activeIngestToggles
-    .map(([key, value]) => `${key}=${value}`)
-    .join(', ');
-  console.log(`codexmeter ingest toggles: ${label}`);
-}
-
 const app = createServer(opts.codexHome, {
   from,
   to,
@@ -83,7 +46,6 @@ const app = createServer(opts.codexHome, {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   devApiOnly: process.env.CODEXMETER_DEV_API_ONLY === '1',
   frontendBaseUrl: process.env.CODEXMETER_FRONTEND_URL || null,
-  ...ingestToggles,
 });
 
 const port = parseInt(opts.port, 10) || 0;
