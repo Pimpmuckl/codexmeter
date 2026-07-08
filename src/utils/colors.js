@@ -16,6 +16,9 @@ const REPO_PALETTE = [
 
 // Curated colors for common models (consistent across machines)
 const MODEL_COLORS = {
+  'gpt-5.6-sol':          '#f6c453',
+  'gpt-5.6-terra':        '#36b37e',
+  'gpt-5.6-luna':         '#8ab4ff',
   'gpt-5.5':              '#22c790',
   'gpt-5.4':              '#fa4141',
   'gpt-5-mini':           '#fb7185',
@@ -43,6 +46,15 @@ const MODEL_COLORS = {
 
 const MODEL_COLOR_ALIASES = {
   'codex-mini-latest': 'o4-mini',
+  'gpt 5.6 sol': 'gpt-5.6-sol',
+  'gpt-5.6 sol': 'gpt-5.6-sol',
+  'openai/gpt-5.6-sol': 'gpt-5.6-sol',
+  'gpt 5.6 terra': 'gpt-5.6-terra',
+  'gpt-5.6 terra': 'gpt-5.6-terra',
+  'openai/gpt-5.6-terra': 'gpt-5.6-terra',
+  'gpt 5.6 luna': 'gpt-5.6-luna',
+  'gpt-5.6 luna': 'gpt-5.6-luna',
+  'openai/gpt-5.6-luna': 'gpt-5.6-luna',
   'gpt 5.5': 'gpt-5.5',
   'gpt-5.5': 'gpt-5.5',
   'gpt 5 mini': 'gpt-5-mini',
@@ -71,6 +83,7 @@ const EFFORT_COLORS = {
   high:      '#f59e0b',
   xhigh:     '#a855f7',
   'x-high':  '#a855f7',
+  max:       '#f6c453',
   unknown:   '#64748b',
 };
 
@@ -82,6 +95,7 @@ export function normalizeEffortKey(effort) {
   if (k === 'medium') return 'medium';
   if (k === 'high') return 'high';
   if (k === 'xhigh') return 'xhigh';
+  if (k === 'max') return 'max';
   if (k === 'unknown') return 'unknown';
   return k;
 }

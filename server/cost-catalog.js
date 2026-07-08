@@ -39,12 +39,15 @@ export function calculateCostFromUsage(modelName, usage) {
 
   const inputTokens = usage.input_tokens || 0;
   const cachedInputTokens = usage.cached_input_tokens || 0;
+  const cacheWriteInputTokens = usage.cache_write_input_tokens || 0;
   const outputTokens = usage.output_tokens || 0;
-  const uncachedInputTokens = Math.max(inputTokens - cachedInputTokens, 0);
+  const uncachedInputTokens = Math.max(inputTokens - cachedInputTokens - cacheWriteInputTokens, 0);
+  const cacheWriteRate = entry.cache_write ?? entry.input;
 
   return (
     (uncachedInputTokens * entry.input) +
     (cachedInputTokens * entry.cached_input) +
+    (cacheWriteInputTokens * cacheWriteRate) +
     (outputTokens * entry.output)
   ) / 1_000_000;
 }
@@ -77,7 +80,7 @@ export function getModelPricing(modelName) {
   return getPricing()[modelName] || null;
 }
 
-export const CATALOG_VERSION = '2026-04-23';
+export const CATALOG_VERSION = '2026-07-08';
 export const CACHE_ASSUMPTIONS = {
   input_fraction: INPUT_FRACTION,
   output_fraction: OUTPUT_FRACTION,

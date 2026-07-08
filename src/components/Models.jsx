@@ -21,7 +21,7 @@ function fmtCost(n) {
   return '$' + n.toFixed(2);
 }
 
-const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'unknown'];
+const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max', 'unknown'];
 
 function sortEffortEntries(entries) {
   return [...entries].sort(([a], [b]) => {

@@ -65,6 +65,7 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
     const usageByDay = new Map();
     let lastInputTokens = 0;
     let lastCachedInputTokens = 0;
+    let lastCacheWriteInputTokens = 0;
     let lastOutputTokens = 0;
     let lastReasoningOutputTokens = 0;
     let lastTotalTokens = 0;
@@ -113,19 +114,21 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
         if (obj.type === 'event_msg' && obj.payload?.type === 'token_count') {
           const usage = obj.payload.info?.total_token_usage;
           if (usage) {
-            const inputTokens = usage.input_tokens || 0;
-            const cachedInputTokens = usage.cached_input_tokens || 0;
-            const outputTokens = usage.output_tokens || 0;
-            const reasoningOutputTokens = usage.reasoning_output_tokens || 0;
-            const totalTokens = usage.total_tokens || 0;
+            const normalizedUsage = normalizeUsageTotals(usage);
+            const inputTokens = normalizedUsage.input_tokens;
+            const cachedInputTokens = normalizedUsage.cached_input_tokens;
+            const cacheWriteInputTokens = normalizedUsage.cache_write_input_tokens || 0;
+            const outputTokens = normalizedUsage.output_tokens;
+            const reasoningOutputTokens = normalizedUsage.reasoning_output_tokens;
+            const totalTokens = normalizedUsage.total_tokens;
 
-            result.usage_total = {
+            result.usage_total = withCacheWrite({
               input_tokens: inputTokens,
               cached_input_tokens: cachedInputTokens,
               output_tokens: outputTokens,
               reasoning_output_tokens: reasoningOutputTokens,
               total_tokens: totalTokens,
-            };
+            }, cacheWriteInputTokens);
 
             const hasReset =
               hasSeenUsage &&
@@ -138,30 +141,34 @@ export async function enrichFromRollout(rolloutPath, opts = {}) {
               hasSeenUsage = false;
               lastInputTokens = 0;
               lastCachedInputTokens = 0;
+              lastCacheWriteInputTokens = 0;
               lastOutputTokens = 0;
               lastReasoningOutputTokens = 0;
               lastTotalTokens = 0;
             }
 
             const usageDelta = hasSeenUsage
-              ? {
+              ? withCacheWrite({
                   input_tokens: Math.max(inputTokens - lastInputTokens, 0),
                   cached_input_tokens: Math.max(cachedInputTokens - lastCachedInputTokens, 0),
+                  cache_write_input_tokens: Math.max(cacheWriteInputTokens - lastCacheWriteInputTokens, 0),
                   output_tokens: Math.max(outputTokens - lastOutputTokens, 0),
                   reasoning_output_tokens: Math.max(reasoningOutputTokens - lastReasoningOutputTokens, 0),
                   total_tokens: Math.max(totalTokens - lastTotalTokens, 0),
-                }
-              : {
+                }, Math.max(cacheWriteInputTokens - lastCacheWriteInputTokens, 0))
+              : withCacheWrite({
                   input_tokens: inputTokens,
                   cached_input_tokens: cachedInputTokens,
+                  cache_write_input_tokens: cacheWriteInputTokens,
                   output_tokens: outputTokens,
                   reasoning_output_tokens: reasoningOutputTokens,
                   total_tokens: totalTokens,
-                };
+                }, cacheWriteInputTokens);
 
             hasSeenUsage = true;
             lastInputTokens = inputTokens;
             lastCachedInputTokens = cachedInputTokens;
+            lastCacheWriteInputTokens = cacheWriteInputTokens;
             lastOutputTokens = outputTokens;
             lastReasoningOutputTokens = reasoningOutputTokens;
             lastTotalTokens = totalTokens;
@@ -448,36 +455,39 @@ function isTokenCountEventLine(line) {
 }
 
 function normalizeUsageTotals(usage) {
-  return {
+  return withCacheWrite({
     input_tokens: usage.input_tokens || 0,
-    cached_input_tokens: usage.cached_input_tokens || 0,
+    cached_input_tokens: usage.cached_input_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0,
     output_tokens: usage.output_tokens || 0,
     reasoning_output_tokens: usage.reasoning_output_tokens || 0,
     total_tokens: usage.total_tokens || 0,
-  };
+  }, usage.cache_write_input_tokens ?? usage.cache_write_tokens ?? usage.input_tokens_details?.cache_write_tokens ?? 0);
 }
 
 function splitUsageTotals(usage) {
   const normalized = normalizeUsageTotals(usage || {});
   const cachedInputTokens = Math.min(normalized.cached_input_tokens, normalized.input_tokens);
+  const cacheWriteInputTokens = Math.min(normalized.cache_write_input_tokens || 0, Math.max(normalized.input_tokens - cachedInputTokens, 0));
   return {
-    uncached_input_tokens: Math.max(normalized.input_tokens - cachedInputTokens, 0),
+    uncached_input_tokens: Math.max(normalized.input_tokens - cachedInputTokens - cacheWriteInputTokens, 0),
     cached_input_tokens: cachedInputTokens,
+    cache_write_input_tokens: cacheWriteInputTokens,
     output_tokens: normalized.output_tokens,
     reasoning_output_tokens: normalized.reasoning_output_tokens,
   };
 }
 
 function combineUsageTotals(parts, currentTotalTokens = 0, previousTotalTokens = 0) {
-  const inputTokens = (parts.uncached_input_tokens || 0) + (parts.cached_input_tokens || 0);
+  const cacheWriteInputTokens = parts.cache_write_input_tokens || 0;
+  const inputTokens = (parts.uncached_input_tokens || 0) + (parts.cached_input_tokens || 0) + cacheWriteInputTokens;
   const outputTokens = parts.output_tokens || 0;
-  return {
+  return withCacheWrite({
     input_tokens: inputTokens,
     cached_input_tokens: parts.cached_input_tokens || 0,
     output_tokens: outputTokens,
     reasoning_output_tokens: parts.reasoning_output_tokens || 0,
     total_tokens: Math.max(inputTokens + outputTokens, Math.max(currentTotalTokens - previousTotalTokens, 0)),
-  };
+  }, cacheWriteInputTokens);
 }
 
 export function subtractUsageTotals(current, previous) {
@@ -486,6 +496,7 @@ export function subtractUsageTotals(current, previous) {
   return combineUsageTotals({
     uncached_input_tokens: Math.max(currentParts.uncached_input_tokens - previousParts.uncached_input_tokens, 0),
     cached_input_tokens: Math.max(currentParts.cached_input_tokens - previousParts.cached_input_tokens, 0),
+    cache_write_input_tokens: Math.max(currentParts.cache_write_input_tokens - previousParts.cache_write_input_tokens, 0),
     output_tokens: Math.max(currentParts.output_tokens - previousParts.output_tokens, 0),
     reasoning_output_tokens: Math.max(currentParts.reasoning_output_tokens - previousParts.reasoning_output_tokens, 0),
   }, current?.total_tokens || 0, previous?.total_tokens || 0);
@@ -495,6 +506,7 @@ export function hasUsageTotals(usage) {
   return !!usage && (
     (usage.input_tokens || 0) > 0 ||
     (usage.cached_input_tokens || 0) > 0 ||
+    (usage.cache_write_input_tokens || 0) > 0 ||
     (usage.output_tokens || 0) > 0 ||
     (usage.reasoning_output_tokens || 0) > 0 ||
     (usage.total_tokens || 0) > 0
@@ -505,6 +517,7 @@ function hasUsage(usage) {
   return !!usage && (
     usage.input_tokens > 0 ||
     usage.cached_input_tokens > 0 ||
+    (usage.cache_write_input_tokens || 0) > 0 ||
     usage.output_tokens > 0
   );
 }
@@ -521,5 +534,14 @@ function mergeUsageTotals(target, dayKey, usage) {
   }
   previous.input_tokens += usage.input_tokens || 0;
   previous.cached_input_tokens += usage.cached_input_tokens || 0;
+  if (usage.cache_write_input_tokens) {
+    previous.cache_write_input_tokens = (previous.cache_write_input_tokens || 0) + usage.cache_write_input_tokens;
+  }
   previous.output_tokens += usage.output_tokens || 0;
+}
+
+function withCacheWrite(usage, cacheWriteInputTokens) {
+  const value = Math.max(0, cacheWriteInputTokens || 0);
+  if (value > 0) usage.cache_write_input_tokens = value;
+  return usage;
 }

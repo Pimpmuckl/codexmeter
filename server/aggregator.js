@@ -8,6 +8,7 @@ function normalizeEffortKey(effort) {
   if (k === 'medium') return 'medium';
   if (k === 'high') return 'high';
   if (k === 'xhigh') return 'xhigh';
+  if (k === 'max') return 'max';
   return k || 'unknown';
 }
 
