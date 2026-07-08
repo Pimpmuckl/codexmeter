@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from './api';
-import Overview from './components/Overview';
-import Repos from './components/Repos';
-import Models from './components/Models';
-import DailyUsage from './components/DailyUsage';
-import Sessions from './components/Sessions';
-import OverviewVideoExport from './components/OverviewVideoExport';
 import { buildLiveDataEnvelope, buildLiveStateFromSettled, chooseLiveEnvelope, mergeLiveEvent, shouldUseLiveData } from './live-state';
 import { debugLive, summarizeLivePayload, summarizeLiveState } from './utils/liveDebug';
+
+const Overview = lazy(() => import('./components/Overview'));
+const Repos = lazy(() => import('./components/Repos'));
+const Models = lazy(() => import('./components/Models'));
+const DailyUsage = lazy(() => import('./components/DailyUsage'));
+const Sessions = lazy(() => import('./components/Sessions'));
+const OverviewVideoExport = lazy(() => import('./components/OverviewVideoExport'));
 
 const TABS = ['Overview', 'Repos', 'Models', 'Daily', 'Sessions'];
 
@@ -53,7 +54,11 @@ export default function App() {
   const exportMode = search?.get('export');
   const exportJobId = search?.get('job');
   if (exportMode === 'overview-video' && exportJobId) {
-    return <OverviewVideoExport jobId={exportJobId} />;
+    return (
+      <Suspense fallback={null}>
+        <OverviewVideoExport jobId={exportJobId} />
+      </Suspense>
+    );
   }
 
   const [progress, setProgress] = useState(null);
@@ -719,53 +724,55 @@ export default function App() {
           </div>
         </nav>
 
-        <div className="main-content">
-          {tab === 'Overview' && (
-            <Overview
-              data={overviewData}
-              heatmap={overviewHeatmap}
-              daily={overviewDaily}
-              families={overviewFamilies}
-              repos={overviewRepos}
-              models={overviewModels}
-              range={range}
-              onPresentationSettledChange={setOverviewPresentationSettled}
-              ingestProgress={overviewIngestProgress}
-              isIngestActive={overviewIngestActive}
-              currentDateBucket={progress?.current_date_bucket || null}
-              onDailyDebugStatsChange={setDailyDebugStats}
-              onPresentationDateRangeChange={setOverviewPresentationDateRange}
-              onNavigateToDailyDay={handleNavigateToDailyDay}
-              onNavigateToRepo={handleNavigateToRepo}
-              onNavigateToModel={handleNavigateToModel}
-            />
-          )}
-          {tab === 'Repos' && (
-            <Repos
-              data={tabRepos}
-              range={range}
-              focusRequest={reposFocusRequest}
-              onFocusRequestConsumed={() => setReposFocusRequest(null)}
-            />
-          )}
-          {tab === 'Models' && (
-            <Models
-              data={tabModels}
-              range={range}
-              focusRequest={modelsFocusRequest}
-              onFocusRequestConsumed={() => setModelsFocusRequest(null)}
-            />
-          )}
-          {tab === 'Daily' && (
-            <DailyUsage
-              data={tabDaily}
-              range={range}
-              navigateToDayRequest={dailyNavigateRequest}
-              onNavigateToDayConsumed={() => setDailyNavigateRequest(null)}
-            />
-          )}
-          {tab === 'Sessions' && <Sessions data={data.sessions} />}
-        </div>
+        <Suspense fallback={null}>
+          <div className="main-content">
+            {tab === 'Overview' && (
+              <Overview
+                data={overviewData}
+                heatmap={overviewHeatmap}
+                daily={overviewDaily}
+                families={overviewFamilies}
+                repos={overviewRepos}
+                models={overviewModels}
+                range={range}
+                onPresentationSettledChange={setOverviewPresentationSettled}
+                ingestProgress={overviewIngestProgress}
+                isIngestActive={overviewIngestActive}
+                currentDateBucket={progress?.current_date_bucket || null}
+                onDailyDebugStatsChange={setDailyDebugStats}
+                onPresentationDateRangeChange={setOverviewPresentationDateRange}
+                onNavigateToDailyDay={handleNavigateToDailyDay}
+                onNavigateToRepo={handleNavigateToRepo}
+                onNavigateToModel={handleNavigateToModel}
+              />
+            )}
+            {tab === 'Repos' && (
+              <Repos
+                data={tabRepos}
+                range={range}
+                focusRequest={reposFocusRequest}
+                onFocusRequestConsumed={() => setReposFocusRequest(null)}
+              />
+            )}
+            {tab === 'Models' && (
+              <Models
+                data={tabModels}
+                range={range}
+                focusRequest={modelsFocusRequest}
+                onFocusRequestConsumed={() => setModelsFocusRequest(null)}
+              />
+            )}
+            {tab === 'Daily' && (
+              <DailyUsage
+                data={tabDaily}
+                range={range}
+                navigateToDayRequest={dailyNavigateRequest}
+                onNavigateToDayConsumed={() => setDailyNavigateRequest(null)}
+              />
+            )}
+            {tab === 'Sessions' && <Sessions data={data.sessions} />}
+          </div>
+        </Suspense>
         {overviewIngestActive && dailyDebugStats && (
           <div className="app-footer-debug">
             Daily Usage presentation: {dailyDebugStats.speedDaysPerSecond.toFixed(1)} days/s
