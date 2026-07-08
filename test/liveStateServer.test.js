@@ -56,9 +56,8 @@ test('live model summaries preserve max reasoning effort', () => {
     has_usage_by_day: false,
   };
   const live = createLiveAggregateState('UTC');
-  const patch = createEmptyLivePatch();
 
-  applySessionToLiveState(live, session, patch);
+  applySessionToLiveState(live, session);
   const model = buildLiveBootstrap(live).models.total[0];
 
   assert.equal(model.model_name, 'gpt-5.6-sol');
