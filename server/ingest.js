@@ -647,6 +647,7 @@ function subtractUsageFromDayBuckets(usageByDay, inheritedUsage) {
   const remaining = {
     input_tokens: inheritedUsage?.input_tokens || 0,
     cached_input_tokens: inheritedUsage?.cached_input_tokens || 0,
+    cache_write_input_tokens: inheritedUsage?.cache_write_input_tokens || 0,
     output_tokens: inheritedUsage?.output_tokens || 0,
     reasoning_output_tokens: inheritedUsage?.reasoning_output_tokens || 0,
     total_tokens: inheritedUsage?.total_tokens || 0,
@@ -658,6 +659,7 @@ function subtractUsageFromDayBuckets(usageByDay, inheritedUsage) {
     const adjusted = subtractUsageTotals({
       input_tokens: current.input_tokens || 0,
       cached_input_tokens: current.cached_input_tokens || 0,
+      cache_write_input_tokens: current.cache_write_input_tokens || 0,
       output_tokens: current.output_tokens || 0,
       total_tokens: (current.input_tokens || 0) + (current.output_tokens || 0),
     }, remaining);
@@ -665,6 +667,7 @@ function subtractUsageFromDayBuckets(usageByDay, inheritedUsage) {
     const consumed = subtractUsageTotals({
       input_tokens: current.input_tokens || 0,
       cached_input_tokens: current.cached_input_tokens || 0,
+      cache_write_input_tokens: current.cache_write_input_tokens || 0,
       output_tokens: current.output_tokens || 0,
       total_tokens: (current.input_tokens || 0) + (current.output_tokens || 0),
     }, adjusted);
@@ -672,15 +675,20 @@ function subtractUsageFromDayBuckets(usageByDay, inheritedUsage) {
     Object.assign(remaining, subtractUsageTotals(remaining, consumed));
 
     if (adjusted.input_tokens > 0 || adjusted.cached_input_tokens > 0 || adjusted.output_tokens > 0) {
-      next[dayKey] = {
+      next[dayKey] = maybeWithCacheWrite({
         input_tokens: adjusted.input_tokens,
         cached_input_tokens: adjusted.cached_input_tokens,
         output_tokens: adjusted.output_tokens,
-      };
+      }, adjusted.cache_write_input_tokens);
     }
   }
 
   return next;
+}
+
+function maybeWithCacheWrite(usage, cacheWriteInputTokens) {
+  if (cacheWriteInputTokens > 0) usage.cache_write_input_tokens = cacheWriteInputTokens;
+  return usage;
 }
 
 function deriveLiveSortDay(session, toDayKey) {

@@ -1,5 +1,8 @@
 // Local pricing catalog for models used in codex-cli/codex app lifetime.
 const FALLBACK = {
+  'gpt-5.6-sol':         { input: 5.00,  output: 30.00, cached_input: 0.50, cache_write: 6.25 },
+  'gpt-5.6-terra':       { input: 2.50,  output: 15.00, cached_input: 0.25, cache_write: 3.125 },
+  'gpt-5.6-luna':        { input: 1.00,  output:  6.00, cached_input: 0.10, cache_write: 1.25 },
   'gpt-5.5':             { input: 5.00,  output: 30.00, cached_input: 0.50 },
   'gpt-5.4':             { input: 2.50,  output: 15.00, cached_input: 0.25 },
   'gpt-5-mini':          { input: 0.75,  output:  4.50, cached_input: 0.075},
@@ -29,7 +32,10 @@ const PRICING_URL = process.env.CODEXMETER_PRICING_URL || null;
 function normalizeEntry(entry) {
   if (!entry || typeof entry !== 'object' || entry.input == null || entry.output == null) return null;
   const cached = entry.cached_input ?? entry.cachedInput ?? entry.input * 0.1;
-  return { input: entry.input, output: entry.output, cached_input: cached };
+  const normalized = { input: entry.input, output: entry.output, cached_input: cached };
+  const cacheWrite = entry.cache_write ?? entry.cacheWrite ?? entry.cache_write_input;
+  if (cacheWrite != null) normalized.cache_write = cacheWrite;
+  return normalized;
 }
 
 function normalizePricing(raw) {

@@ -350,6 +350,55 @@ test('reasoning-only token events still establish the first usage timestamp', as
   }
 });
 
+test('rollout usage reads cache write tokens from Responses input details', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'codexmeter-rollout-'));
+  const rolloutPath = path.join(dir, 'rollout.jsonl');
+  try {
+    await writeFile(rolloutPath, [
+      JSON.stringify({
+        timestamp: '2026-07-08T10:00:00.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 100,
+              input_tokens_details: {
+                cached_tokens: 30,
+                cache_write_tokens: 20,
+              },
+              output_tokens: 5,
+              total_tokens: 105,
+            },
+          },
+        },
+      }),
+      '',
+    ].join('\n'));
+
+    const data = await enrichFromRollout(rolloutPath, { timezone: 'UTC' });
+
+    assert.deepEqual(data.usage_total, {
+      input_tokens: 100,
+      cached_input_tokens: 30,
+      cache_write_input_tokens: 20,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+      total_tokens: 105,
+    });
+    assert.deepEqual(data.usage_by_day, {
+      '2026-07-08': {
+        input_tokens: 100,
+        cached_input_tokens: 30,
+        cache_write_input_tokens: 20,
+        output_tokens: 5,
+      },
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('rollout active seconds split across timezone midnight', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'codexmeter-rollout-'));
   const rolloutPath = path.join(dir, 'rollout.jsonl');
