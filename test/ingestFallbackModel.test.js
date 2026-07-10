@@ -55,21 +55,21 @@ async function createCodexHomeWithMissingRolloutThread() {
     model_provider: 'openai',
     model: 'gpt-5.4',
     reasoning_effort: 'medium',
-    cwd: '\\\\?\\C:\\Code\\nextide-saas-vod-kraken',
+    cwd: '\\\\?\\C:\\Users\\test\\.codex\\worktrees\\spp_worktrees\\yayj5j5t',
     title: 'Fallback model session',
     tokens_used: 1_000_000,
     agent_nickname: null,
     agent_role: null,
     cli_version: '0.0.0-test',
     git_branch: 'main',
-    git_origin_url: null,
+    git_origin_url: 'https://github.com/Pimpmuckl/nextide-saas-vod-kraken.git',
   });
   db.close();
 
   return { root, codexHome };
 }
 
-test('ingest preserves raw SQLite model when rollout file is missing', async () => {
+test('ingest preserves SQLite metadata when rollout file is missing', async () => {
   const fixture = await createCodexHomeWithMissingRolloutThread();
 
   try {
@@ -83,7 +83,9 @@ test('ingest preserves raw SQLite model when rollout file is missing', async () 
     assert.ok(session);
     assert.equal(session.model_name, 'gpt-5.4');
     assert.equal(session.reasoning_effort, 'medium');
+    assert.equal(session.repo_label, 'nextide-saas-vod-kraken');
     assert.equal(session.cost_source, 'heuristic');
+    assert.equal(state.aggregates.repos.total[0].repo_key, 'repo:nextide-saas-vod-kraken');
 
     const byDate = new Map((state.aggregates.daily || []).map((row) => [row.date, row]));
     const apr09 = byDate.get('2026-04-09');

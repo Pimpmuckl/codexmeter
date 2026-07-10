@@ -25,13 +25,17 @@ export function normalizeCwd(cwd) {
   return p;
 }
 
-export function deriveRepoKey(normalizedCwd) {
-  const label = deriveRepoLabel(normalizedCwd);
+export function deriveRepoKey(normalizedCwd, gitOriginUrl) {
+  const label = deriveRepoLabel(normalizedCwd, gitOriginUrl);
   return label === 'unknown' ? 'unknown' : `repo:${label}`;
 }
 
-export function deriveRepoLabel(normalizedCwd) {
+export function deriveRepoLabel(normalizedCwd, gitOriginUrl) {
   if (!normalizedCwd) return 'unknown';
+  if (normalizedCwd.includes('.codex/worktrees/')) {
+    const originLabel = deriveOriginRepoLabel(gitOriginUrl);
+    if (originLabel) return originLabel;
+  }
   const worktreeMatch = normalizedCwd.match(/\.codex\/worktrees\/[^/]+\/([^/]+)/);
   if (worktreeMatch) return collapseWorktreeLabel(worktreeMatch[1]);
   if (normalizedCwd.includes('.codex')) return '.codex';
@@ -44,6 +48,15 @@ function collapseWorktreeLabel(label) {
     .replace(/-wt-[a-z0-9._-]+$/i, '')
     .replace(/-worktree-[a-z0-9._-]+$/i, '')
     .replace(/-worktrees?-[a-z0-9._-]+$/i, '') || 'unknown';
+}
+
+function deriveOriginRepoLabel(gitOriginUrl) {
+  const clean = String(gitOriginUrl || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/[?#].*$/, '')
+    .replace(/\/+$/, '');
+  return clean.split('/').pop()?.replace(/\.git$/i, '').toLowerCase() || null;
 }
 
 export function classifyAgentFamily(agentRole) {

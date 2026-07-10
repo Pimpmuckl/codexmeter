@@ -54,6 +54,7 @@ export function readThreads(codexHome, onProgress) {
         parent_thread_id: row.parent_thread_id || null,
         cli_version: row.cli_version || '',
         git_branch: row.git_branch || null,
+        git_origin_url: row.git_origin_url || null,
       });
       read++;
       if (onProgress && read % 200 === 0) {
