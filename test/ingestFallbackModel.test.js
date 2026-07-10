@@ -36,7 +36,7 @@ async function createCodexHomeWithMissingRolloutThread() {
 
   const startedAt = Math.floor(Date.parse('2026-04-09T21:30:00Z') / 1000);
   const endedAt = Math.floor(Date.parse('2026-04-09T22:30:00Z') / 1000);
-  db.prepare(`
+  const insert = db.prepare(`
     INSERT INTO threads (
       id, rollout_path, created_at, updated_at,
       source, model_provider, model, reasoning_effort, cwd, title,
@@ -46,7 +46,8 @@ async function createCodexHomeWithMissingRolloutThread() {
       @source, @model_provider, @model, @reasoning_effort, @cwd, @title,
       @tokens_used, @agent_nickname, @agent_role, @cli_version, @git_branch, @git_origin_url
     )
-  `).run({
+  `);
+  const worktreeThread = {
     id: 'fallback-model-thread',
     rollout_path: path.join(codexHome, 'sessions', 'missing-rollout.jsonl'),
     created_at: startedAt,
@@ -63,6 +64,15 @@ async function createCodexHomeWithMissingRolloutThread() {
     cli_version: '0.0.0-test',
     git_branch: 'main',
     git_origin_url: 'https://github.com/Pimpmuckl/nextide-saas-vod-kraken.git',
+  };
+  insert.run(worktreeThread);
+  insert.run({
+    ...worktreeThread,
+    id: 'renamed-checkout-thread',
+    rollout_path: path.join(codexHome, 'sessions', 'missing-checkout-rollout.jsonl'),
+    cwd: '\\\\?\\C:\\Code\\local-kraken-clone',
+    title: 'Renamed checkout session',
+    tokens_used: 0,
   });
   db.close();
 
@@ -85,6 +95,8 @@ test('ingest preserves SQLite metadata when rollout file is missing', async () =
     assert.equal(session.reasoning_effort, 'medium');
     assert.equal(session.repo_label, 'nextide-saas-vod-kraken');
     assert.equal(session.cost_source, 'heuristic');
+    assert.equal(state.sessions.find((row) => row.thread_id === 'renamed-checkout-thread')?.repo_label, 'nextide-saas-vod-kraken');
+    assert.equal(state.aggregates.repos.total.length, 1);
     assert.equal(state.aggregates.repos.total[0].repo_key, 'repo:nextide-saas-vod-kraken');
 
     const byDate = new Map((state.aggregates.daily || []).map((row) => [row.date, row]));

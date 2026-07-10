@@ -32,10 +32,8 @@ export function deriveRepoKey(normalizedCwd, gitOriginUrl) {
 
 export function deriveRepoLabel(normalizedCwd, gitOriginUrl) {
   if (!normalizedCwd) return 'unknown';
-  if (normalizedCwd.includes('.codex/worktrees/')) {
-    const originLabel = deriveOriginRepoLabel(gitOriginUrl);
-    if (originLabel) return originLabel;
-  }
+  const originLabel = deriveOriginRepoLabel(gitOriginUrl);
+  if (originLabel) return originLabel;
   const worktreeMatch = normalizedCwd.match(/\.codex\/worktrees\/[^/]+\/([^/]+)/);
   if (worktreeMatch) return collapseWorktreeLabel(worktreeMatch[1]);
   if (normalizedCwd.includes('.codex')) return '.codex';
