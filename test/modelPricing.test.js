@@ -45,16 +45,16 @@ test('gpt-5.6 family pricing tracks cache writes separately', async () => {
     cache_write: 6.25,
   });
   assert.deepEqual(getModelPricing('gpt-5.6-terra'), {
-    input: 2.5,
-    output: 15,
-    cached_input: 0.25,
-    cache_write: 3.125,
+    input: 2,
+    output: 12,
+    cached_input: 0.2,
+    cache_write: 2.5,
   });
   assert.deepEqual(getModelPricing('gpt-5.6-luna'), {
-    input: 1,
-    output: 6,
-    cached_input: 0.1,
-    cache_write: 1.25,
+    input: 0.2,
+    output: 1.2,
+    cached_input: 0.02,
+    cache_write: 0.25,
   });
 
   assert.equal(calculateCostFromUsage('gpt-5.6-sol', {
@@ -63,7 +63,32 @@ test('gpt-5.6 family pricing tracks cache writes separately', async () => {
     cache_write_input_tokens: 200_000,
     output_tokens: 100_000,
   }), 6.9);
-  assert.equal(CATALOG_VERSION, '2026-07-08');
+  assert.equal(CATALOG_VERSION, '2026-07-30');
+});
+
+test('gpt-5.6 Luna and Terra keep their previous prices before July 30', async () => {
+  await initPricing();
+
+  const usage = {
+    input_tokens: 1_000_000,
+    cached_input_tokens: 300_000,
+    cache_write_input_tokens: 200_000,
+    output_tokens: 100_000,
+  };
+
+  assert.equal(calculateCostFromUsage('gpt-5.6-terra', usage, '2026-07-29'), 3.45);
+  assert.equal(calculateCostFromUsage('gpt-5.6-terra', usage, '2026-07-30'), 2.76);
+  assert.equal(calculateCostFromUsage('gpt-5.6-luna', usage, '2026-07-29'), 1.38);
+  assert.equal(calculateCostFromUsage('gpt-5.6-luna', usage, '2026-07-30'), 0.276);
+  assert.deepEqual(priceSession('gpt-5.6-terra', {
+    usageByDay: {
+      '2026-07-29': usage,
+      '2026-07-30': usage,
+    },
+  }), {
+    cost: 6.21,
+    source: 'exact',
+  });
 });
 
 test('gpt-5 mini and gpt-5.4 mini remain distinct canonical models with matching pricing', async () => {
@@ -98,7 +123,7 @@ test('gpt-5 mini and gpt-5.4 mini remain distinct canonical models with matching
 
   assert.equal(cost, 1.245);
   assert.equal(cost54, 1.245);
-  assert.equal(CATALOG_VERSION, '2026-07-08');
+  assert.equal(CATALOG_VERSION, '2026-07-30');
 });
 
 test('gpt-5 nano and gpt-5.4 nano remain distinct canonical models with matching pricing', async () => {
@@ -134,7 +159,7 @@ test('gpt-5 nano and gpt-5.4 nano remain distinct canonical models with matching
 
   assert.equal(cost, 0.189);
   assert.equal(cost54, 0.189);
-  assert.equal(CATALOG_VERSION, '2026-07-08');
+  assert.equal(CATALOG_VERSION, '2026-07-30');
 });
 
 test('gpt-5.2 remains distinct from gpt-5.2-codex', async () => {
