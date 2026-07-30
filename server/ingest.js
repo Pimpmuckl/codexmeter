@@ -207,10 +207,10 @@ export async function runIngest(codexHome, state, opts = {}) {
           s.usage_by_day = buildUsageByDayMetrics(s.model_name, s._usage_by_day_raw);
           s.has_usage_by_day = s.usage_by_day.length > 0;
         }
-        delete s._usage_by_day_raw;
         delete s._first_usage_timestamp_ms;
         delete s._usage_reset_detected;
         finalizeSessionMetrics(s, toDayKey);
+        delete s._usage_by_day_raw;
         s.live_sort_day = deriveLiveSortDay(s, toDayKey);
         s.materialized = true;
       }
@@ -529,6 +529,8 @@ function finalizeSessionMetrics(session, toDayKey) {
     const priced = priceSession(session.model_name, {
       totalTokens: session.tokens_used,
       usageBuckets: session.usage_total,
+      usageByDay: session._usage_by_day_raw,
+      pricingDate: session.started_at ? toDayKey(session.started_at * 1000) : null,
     });
     session.cost = priced.cost;
     session.cost_source = priced.source;
@@ -539,7 +541,7 @@ function buildUsageByDayMetrics(modelName, usageByDay) {
   const entries = [];
   for (const [dayKey, usage] of Object.entries(usageByDay || {})) {
     const tokens = (usage?.input_tokens || 0) + (usage?.output_tokens || 0);
-    const cost = calculateCostFromUsage(modelName, usage);
+    const cost = calculateCostFromUsage(modelName, usage, dayKey);
     entries.push({
       day: dayKey,
       tokens,
