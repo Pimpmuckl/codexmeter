@@ -1,0 +1,1 @@
+- If Review Suite is installed, run it only in `fast` mode.
