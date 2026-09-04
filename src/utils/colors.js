@@ -16,6 +16,7 @@ const REPO_PALETTE = [
 
 // Curated colors for common models (consistent across machines)
 const MODEL_COLORS = {
+  'gpt-6-astra':          '#3E63DD',
   'gpt-5.6-sol':          '#f6c453',
   'gpt-5.6-terra':        '#36b37e',
   'gpt-5.6-luna':         '#8ab4ff',
