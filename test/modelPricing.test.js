@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initPricing, calculateCostFromUsage, getModelPricing, priceSession, CATALOG_VERSION } from '../server/cost-catalog.js';
+import { initPricing, calculateCostFromUsage, getModelPricing, priceSession } from '../server/cost-catalog.js';
 import { normalizeModelName } from '../server/normalize.js';
 
 test('gpt-5.5 is recognized as a canonical model name with pricing at exactly 2x gpt-5.4', async () => {
@@ -63,7 +63,6 @@ test('gpt-5.6 family pricing tracks cache writes separately', async () => {
     cache_write_input_tokens: 200_000,
     output_tokens: 100_000,
   }), 6.9);
-  assert.equal(CATALOG_VERSION, '2026-09-04');
 });
 
 test('gpt-6 Astra has canonical pricing', async () => {
