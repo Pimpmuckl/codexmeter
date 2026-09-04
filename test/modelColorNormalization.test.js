@@ -20,3 +20,7 @@ test('model colors include the gpt-5.6 family tiers', () => {
   assert.equal(getModelColor('gpt-5.6-luna'), '#8ab4ff');
   assert.equal(getModelColor('openai/gpt-5.6-sol'), '#f6c453');
 });
+
+test('model colors include gpt-6 Astra', () => {
+  assert.equal(getModelColor('gpt-6-astra'), '#3E63DD');
+});
