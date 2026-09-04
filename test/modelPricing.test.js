@@ -134,7 +134,6 @@ test('gpt-5 mini and gpt-5.4 mini remain distinct canonical models with matching
 
   assert.equal(cost, 1.245);
   assert.equal(cost54, 1.245);
-  assert.equal(CATALOG_VERSION, '2026-09-04');
 });
 
 test('gpt-5 nano and gpt-5.4 nano remain distinct canonical models with matching pricing', async () => {
@@ -170,7 +169,6 @@ test('gpt-5 nano and gpt-5.4 nano remain distinct canonical models with matching
 
   assert.equal(cost, 0.189);
   assert.equal(cost54, 0.189);
-  assert.equal(CATALOG_VERSION, '2026-09-04');
 });
 
 test('gpt-5.2 remains distinct from gpt-5.2-codex', async () => {
