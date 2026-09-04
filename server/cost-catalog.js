@@ -109,7 +109,7 @@ export function getModelPricing(modelName) {
   return getPricing()[modelName] || null;
 }
 
-export const CATALOG_VERSION = '2026-07-30';
+export const CATALOG_VERSION = '2026-09-04';
 export const CACHE_ASSUMPTIONS = {
   input_fraction: INPUT_FRACTION,
   output_fraction: OUTPUT_FRACTION,

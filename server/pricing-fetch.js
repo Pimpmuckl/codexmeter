@@ -1,5 +1,6 @@
 // Local pricing catalog for models used in codex-cli/codex app lifetime.
 const FALLBACK = {
+  'gpt-6-astra':         { input: 10.00, output: 50.00, cached_input: 1.00, cache_write: 12.50 },
   'gpt-5.6-sol':         { input: 5.00,  output: 30.00, cached_input: 0.50, cache_write: 6.25 },
   'gpt-5.6-terra':       { input: 2.00,  output: 12.00, cached_input: 0.20, cache_write: 2.50 },
   'gpt-5.6-luna':        { input: 0.20,  output:  1.20, cached_input: 0.02, cache_write: 0.25 },

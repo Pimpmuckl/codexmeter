@@ -14,7 +14,8 @@ test('model colors canonicalize gpt-5.4 mini variants before palette lookup', ()
   assert.equal(getModelColor('GPT 5.4   mini'), '#fb7185');
 });
 
-test('model colors include the gpt-5.6 family tiers', () => {
+test('model colors include curated model tiers', () => {
+  assert.equal(getModelColor('gpt-6-astra'), '#3E63DD');
   assert.equal(getModelColor('gpt-5.6-sol'), '#f6c453');
   assert.equal(getModelColor('gpt-5.6-terra'), '#36b37e');
   assert.equal(getModelColor('gpt-5.6-luna'), '#8ab4ff');
