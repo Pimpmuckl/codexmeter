@@ -69,7 +69,7 @@ export async function createSmokeCodexHome(targetDir) {
         agent_role: role,
         cli_version: 'ci-smoke',
         git_branch: 'main',
-        git_origin_url: 'https://github.com/Pimpmuckl/codexmeter',
+        git_origin_url: 'https://github.com/JJLiebig/codexmeter',
       };
     });
 

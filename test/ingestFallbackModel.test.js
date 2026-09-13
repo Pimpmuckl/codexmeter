@@ -63,7 +63,7 @@ async function createCodexHomeWithMissingRolloutThread() {
     agent_role: null,
     cli_version: '0.0.0-test',
     git_branch: 'main',
-    git_origin_url: 'https://github.com/Pimpmuckl/nextide-saas-vod-kraken.git',
+    git_origin_url: 'https://github.com/JJLiebig/nextide-saas-vod-kraken.git',
   };
   insert.run(worktreeThread);
   insert.run({
